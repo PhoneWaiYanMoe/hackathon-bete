@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:math';
+import 'package:flutter_tts/flutter_tts.dart';
 
 class StoryWeaverGame extends StatefulWidget {
   final int energy;
@@ -22,18 +23,38 @@ class StoryWeaverGame extends StatefulWidget {
 class _StoryWeaverGameState extends State<StoryWeaverGame> {
   final TextEditingController _characterController = TextEditingController();
   final TextEditingController _contextController = TextEditingController();
+  final FlutterTts _flutterTts = FlutterTts();
   String? _generatedStory;
   int? _storyRating;
   int _newCoins = 0;
   bool _isGenerating = false;
+  bool _isSpeaking = false;
 
   // Placeholder Gemini API key (replace with actual key for real use)
-  final String _apiKey = 'AIzaSyABCmiB8TTFtfI80yLqxLHnqMWGKBpuXJU';
+  final String _apiKey = 'AI+++++++++++';
+
+  @override
+  void initState() {
+    super.initState();
+    _setupTts();
+  }
+
+  Future<void> _setupTts() async {
+    await _flutterTts.setLanguage('vi-VN');
+    await _flutterTts.setPitch(1.0);
+    await _flutterTts.setSpeechRate(0.5);
+    _flutterTts.setCompletionHandler(() {
+      setState(() {
+        _isSpeaking = false;
+      });
+    });
+  }
 
   @override
   void dispose() {
     _characterController.dispose();
     _contextController.dispose();
+    _flutterTts.stop();
     super.dispose();
   }
 
@@ -166,8 +187,24 @@ Story:
     );
   }
 
+  Future<void> _readStoryAloud() async {
+    if (_generatedStory == null || _isSpeaking) return;
+    setState(() {
+      _isSpeaking = true;
+    });
+    await _flutterTts.speak(_generatedStory!);
+  }
+
+  Future<void> _stopReading() async {
+    if (_isSpeaking) {
+      await _flutterTts.stop();
+      setState(() {
+        _isSpeaking = false;
+      });
+    }
+  }
+
   String _createMockStory(String character, String storyContext) {
-    // Fallback mock story in Vietnamese folklore style
     List<String> beginnings = [
       'Long ago, in a misty village by the Red River,',
       'Under the ancient banyan tree of Hoan Kiem Lake,',
@@ -197,9 +234,8 @@ The tale of $character is still sung in the village, a reminder of courage and w
   }
 
   int _rateStory(String story) {
-    // Rating criteria: length (30%), coherence (40%), cultural relevance (30%)
-    int lengthScore = (story.length / 600 * 30).clamp(0, 30).toInt(); // Max 30 for ~600 chars
-    int coherenceScore = story.split('.').length > 5 ? 40 : 30; // Basic coherence check
+    int lengthScore = (story.length / 600 * 30).clamp(0, 30).toInt();
+    int coherenceScore = story.split('.').length > 5 ? 40 : 30;
     int culturalScore = (story.contains('Red River') ||
             story.contains('Hoan Kiem') ||
             story.contains('bamboo') ||
@@ -426,6 +462,28 @@ The tale of $character is still sung in the village, a reminder of courage and w
                   ),
                 ),
               ],
+            ),
+          ),
+          SizedBox(height: 16),
+          Center(
+            child: ElevatedButton(
+              onPressed: _isSpeaking ? _stopReading : _readStoryAloud,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green.shade400,
+                foregroundColor: Colors.white,
+                padding: EdgeInsets.symmetric(vertical: 16, horizontal: 32),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(25),
+                ),
+                elevation: 8,
+              ),
+              child: Text(
+                _isSpeaking ? 'Stop Reading' : 'Read Aloud',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
           ),
           SizedBox(height: 16),
