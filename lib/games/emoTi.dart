@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
-import 'package:tflite_flutter/tflite_flutter.dart';
-import 'package:image/image.dart' as img;
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:math';
 import 'dart:async';
-import 'dart:typed_data';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class EmoTiGame extends StatefulWidget {
   final int energy;
@@ -30,10 +29,8 @@ enum ChuTeuState { natural, correct, wrong, result }
 
 class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
   late CameraController _cameraController;
-  Interpreter? _interpreter;
   late List<CameraDescription> _cameras;
   bool _isCameraInitialized = false;
-  bool _isModelLoaded = false;
   late List<List<String>> _emotionChains;
   int _currentChainIndex = 0;
   int _currentEmotionIndex = 0;
@@ -93,12 +90,12 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
     _currentStage = (_stageImages..shuffle(Random())).first;
     _usedStages.add(_currentStage);
 
-    _initializeCameraAndModel();
+    _initializeCamera();
   }
 
-  Future<void> _initializeCameraAndModel() async {
+  Future<void> _initializeCamera() async {
     try {
-      // First check camera permission
+      // Check camera permission
       final cameraStatus = await Permission.camera.request();
       if (!cameraStatus.isGranted) {
         _showError('Camera permission denied. Please enable camera access in settings.');
@@ -130,111 +127,15 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
       );
 
       await _cameraController.initialize();
-      
+
       setState(() {
         _isCameraInitialized = true;
       });
 
-      // Load the model with improved error handling
-      await _loadModel();
-
-      // Only start emotion detection if both camera and model are ready
-      if (_isCameraInitialized && _isModelLoaded) {
-        _startEmotionDetection();
-      }
-
+      // Start emotion detection
+      _startEmotionDetection();
     } catch (e) {
       _showError('Error initializing camera: $e');
-    }
-  }
-
-  Future<void> _loadModel() async {
-    try {
-      print('Starting model loading...');
-      
-      // Check if model file exists with more detailed logging
-      ByteData? modelData;
-      try {
-        modelData = await rootBundle.load('assets/model/model_file_30epochs.tflite');
-        print('Model file loaded successfully. Size: ${modelData.lengthInBytes} bytes');
-      } catch (e) {
-        print('Model file loading failed: $e');
-        _showError('Model file not found. Please ensure "assets/model/model_file_30epochs.tflite" exists in your assets folder and is properly declared in pubspec.yaml');
-        return;
-      }
-
-      // Create interpreter with minimal options first
-      try {
-        print('Creating interpreter...');
-        
-        // Try without any options first
-        _interpreter = await Interpreter.fromAsset('assets/model/model_file_30epochs.tflite');
-        print('Interpreter created successfully without options');
-        
-      } catch (e) {
-        print('Failed to create interpreter without options: $e');
-        
-        // Try with basic options
-        try {
-          final interpreterOptions = InterpreterOptions();
-          interpreterOptions.threads = 1;
-          
-          _interpreter = await Interpreter.fromAsset(
-            'assets/model/model_file_30epochs.tflite',
-            options: interpreterOptions,
-          );
-          print('Interpreter created successfully with basic options');
-          
-        } catch (e2) {
-          print('Failed to create interpreter with options: $e2');
-          _showError('Error creating model interpreter: $e2\n\nThis might be due to:\n1. Model incompatibility with current tflite_flutter version\n2. Corrupted model file\n3. Unsupported model operations');
-          return;
-        }
-      }
-
-      // Verify model structure
-      try {
-        final inputTensors = _interpreter!.getInputTensors();
-        final outputTensors = _interpreter!.getOutputTensors();
-        
-        print('Number of input tensors: ${inputTensors.length}');
-        print('Number of output tensors: ${outputTensors.length}');
-        
-        if (inputTensors.isNotEmpty) {
-          final inputShape = inputTensors[0].shape;
-          final inputType = inputTensors[0].type;
-          print('Input tensor shape: $inputShape');
-          print('Input tensor type: $inputType');
-          
-          // More flexible shape checking
-          if (inputShape.length >= 3) {
-            print('Model appears to have valid input dimensions');
-          } else {
-            print('Warning: Unexpected input shape: $inputShape');
-          }
-        }
-        
-        if (outputTensors.isNotEmpty) {
-          final outputShape = outputTensors[0].shape;
-          final outputType = outputTensors[0].type;
-          print('Output tensor shape: $outputShape');
-          print('Output tensor type: $outputType');
-        }
-        
-      } catch (e) {
-        print('Warning: Could not verify model structure: $e');
-        // Continue anyway, as some models might still work
-      }
-
-      setState(() {
-        _isModelLoaded = true;
-      });
-
-      print('Model loaded and verified successfully!');
-
-    } catch (e) {
-      print('Unexpected error in _loadModel: $e');
-      _showError('Unexpected error loading model: $e');
     }
   }
 
@@ -258,19 +159,16 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
   }
 
   void _startEmotionDetection() {
-    if (!_isCameraInitialized || !_isModelLoaded) {
-      print('Cannot start emotion detection: Camera initialized: $_isCameraInitialized, Model loaded: $_isModelLoaded');
+    if (!_isCameraInitialized) {
+      print('Cannot start emotion detection: Camera not initialized');
       return;
     }
 
     _emotionTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
-      if (!_isProcessing && 
-          _isCameraInitialized && 
-          _isModelLoaded &&
-          _currentChainIndex < _emotionChains.length && 
-          _interpreter != null &&
+      if (!_isProcessing &&
+          _isCameraInitialized &&
+          _currentChainIndex < _emotionChains.length &&
           mounted) {
-        
         _isProcessing = true;
         await _processCameraFrame();
         _isProcessing = false;
@@ -284,7 +182,7 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
               _chuTeuState = ChuTeuState.correct;
               _chuTeuController.repeat(reverse: true);
             });
-            
+
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -300,7 +198,7 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
               _chuTeuState = ChuTeuState.wrong;
               _chuTeuController.repeat(reverse: true);
             });
-            
+
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -310,7 +208,7 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
                 ),
               );
             }
-            
+
             Future.delayed(const Duration(seconds: 2), () {
               if (mounted) _nextEmotion();
             });
@@ -321,144 +219,69 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
   }
 
   Future<void> _processCameraFrame() async {
-    if (!_cameraController.value.isInitialized || _interpreter == null || !mounted) {
+    if (!_cameraController.value.isInitialized || !mounted) {
       return;
     }
 
     try {
       final image = await _cameraController.takePicture();
       final bytes = await image.readAsBytes();
-      final decodedImage = img.decodeImage(bytes);
+      final base64Image = base64Encode(bytes);
+      print('Captured image, base64 length: ${base64Image.length}'); // Debug
 
-      if (decodedImage == null) {
-        if (mounted) {
+      // Send to backend
+      final response = await http.post(
+        Uri.parse('http://172.28.240.138:5001/detect_face_emotion_base64'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'image_base64': base64Image}),
+      );
+
+      print('Backend response status: ${response.statusCode}'); // Debug
+      print('Backend response body: ${response.body}'); // Debug
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final emotion = data['emotion']?.toString();
+        final confidence = data['confidence']?.toDouble() ?? 0.0;
+
+        if (emotion != null && mounted) {
+          setState(() {
+            _detectedEmotion = _normalizeEmotionLabel(emotion);
+          });
+          print('Detected emotion: $_detectedEmotion (confidence: ${confidence.toStringAsFixed(3)})'); // Debug
+        } else {
           setState(() {
             _detectedEmotion = 'No face';
           });
+          print('No valid emotion detected in response'); // Debug
         }
-        return;
+      } else {
+        setState(() {
+          _detectedEmotion = 'Server Error';
+        });
+        print('Server error: ${response.statusCode} - ${response.body}'); // Debug
       }
-
-      // Get model input requirements dynamically
-      final inputTensors = _interpreter!.getInputTensors();
-      if (inputTensors.isEmpty) {
-        print('No input tensors found');
-        return;
-      }
-      
-      final inputShape = inputTensors[0].shape;
-      print('Processing with input shape: $inputShape');
-      
-      // Extract dimensions (handle different model formats)
-      int inputHeight = 48;  // default
-      int inputWidth = 48;   // default
-      int channels = 1;      // default to grayscale
-      
-      if (inputShape.length == 4) {
-        // Format: [batch, height, width, channels] or [batch, channels, height, width]
-        if (inputShape[1] == inputShape[2]) {
-          // Likely [batch, height, width, channels]
-          inputHeight = inputShape[1];
-          inputWidth = inputShape[2];
-          channels = inputShape[3];
-        } else if (inputShape[2] == inputShape[3]) {
-          // Likely [batch, channels, height, width]
-          channels = inputShape[1];
-          inputHeight = inputShape[2];
-          inputWidth = inputShape[3];
-        }
-      }
-      
-      print('Using dimensions: ${inputWidth}x${inputHeight}x$channels');
-
-      // Crop to center square for better face detection
-      final width = decodedImage.width;
-      final height = decodedImage.height;
-      final cropSize = min(width, height);
-      final x = (width - cropSize) ~/ 2;
-      final y = (height - cropSize) ~/ 2;
-      
-      final subImage = img.copyCrop(
-        decodedImage,
-        x: x,
-        y: y,
-        width: cropSize,
-        height: cropSize,
-      );
-
-      // Convert to grayscale and resize
-      final grayImage = img.grayscale(subImage);
-      final resized = img.copyResize(grayImage, width: inputWidth, height: inputHeight);
-
-      // Prepare input tensor with proper shape
-      final inputSize = inputHeight * inputWidth * channels;
-      final input = Float32List(inputSize);
-      
-      var pixelIndex = 0;
-      for (int y = 0; y < inputHeight; y++) {
-        for (int x = 0; x < inputWidth; x++) {
-          final pixel = resized.getPixel(x, y);
-          // Normalize pixel value to [0, 1]
-          final normalizedValue = (pixel.r / 255.0);
-          input[pixelIndex] = normalizedValue;
-          pixelIndex++;
-        }
-      }
-
-      // Prepare output tensor
-      final outputTensors = _interpreter!.getOutputTensors();
-      final outputShape = outputTensors[0].shape;
-      final outputSize = outputShape.reduce((a, b) => a * b);
-      final output = Float32List(outputSize);
-      
-      // Run inference with proper tensor shapes
-      try {
-        if (inputShape.length == 4) {
-          _interpreter!.run(
-            [input.reshape([1, inputHeight, inputWidth, channels])], 
-            {0: output.reshape([1, outputSize ~/ 1])}
-          );
-        } else {
-          _interpreter!.run([input], {0: output});
-        }
-        
-        // Get prediction (assuming output is emotion probabilities)
-        double maxValue = output[0];
-        int maxIndex = 0;
-        
-        final numClasses = min(output.length, _emotions.length);
-        for (int i = 1; i < numClasses; i++) {
-          if (output[i] > maxValue) {
-            maxValue = output[i];
-            maxIndex = i;
-          }
-        }
-
-        // Update UI with detected emotion
-        if (mounted && maxIndex < _emotions.length) {
-          setState(() {
-            _detectedEmotion = _emotions[maxIndex];
-          });
-          print('Detected emotion: ${_emotions[maxIndex]} (confidence: ${maxValue.toStringAsFixed(3)})');
-        }
-
-      } catch (e) {
-        print('Inference error: $e');
-        if (mounted) {
-          setState(() {
-            _detectedEmotion = 'Inference Error';
-          });
-        }
-      }
-
     } catch (e) {
-      print('Error processing camera frame: $e');
+      print('Error processing camera frame: $e'); // Debug
       if (mounted) {
         setState(() {
           _detectedEmotion = 'Processing Error';
         });
       }
     }
+  }
+
+  String _normalizeEmotionLabel(String emotion) {
+    // Normalize backend emotion labels to match _emotions list
+    final normalized = emotion.toLowerCase();
+    if (normalized.contains('angry') || normalized.contains('anger')) return 'Angry';
+    if (normalized.contains('disgust')) return 'Disgust';
+    if (normalized.contains('fear')) return 'Fear';
+    if (normalized.contains('happy') || normalized.contains('positive')) return 'Happy';
+    if (normalized.contains('neutral')) return 'Neutral';
+    if (normalized.contains('sad') || normalized.contains('negative')) return 'Sad';
+    if (normalized.contains('surprise')) return 'Surprise';
+    return 'Neutral'; // Default fallback
   }
 
   void _nextEmotion() {
@@ -496,7 +319,7 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
         setState(() {
           _chuTeuState = ChuTeuState.result;
         });
-        
+
         _showGameCompleteDialog();
       }
     });
@@ -559,7 +382,6 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
     _emotionTimer?.cancel();
     _chuTeuController.dispose();
     _cameraController.dispose();
-    _interpreter?.close();
     super.dispose();
   }
 
@@ -578,7 +400,7 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
         break;
       case ChuTeuState.natural:
       default:
-        chuTeuImage = 'assets/img/ChuTeuNatural.png';
+        chuTeuImage = 'assets/img/ChuTeuNeutural.png';
         break;
     }
 
@@ -633,9 +455,9 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
                               ),
                             ),
                             Text(
-                              'Status: ${_isModelLoaded ? "Ready" : "Loading..."}',
+                              'Status: ${_isCameraInitialized ? "Ready" : "Loading..."}',
                               style: TextStyle(
-                                color: _isModelLoaded ? Colors.green : Colors.orange,
+                                color: _isCameraInitialized ? Colors.green : Colors.orange,
                                 fontSize: 12,
                               ),
                             ),
