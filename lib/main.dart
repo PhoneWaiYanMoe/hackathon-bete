@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'dart:async';
 import 'dart:math';
+import 'dart:io';
+import 'dart:convert';
+import 'package:path_provider/path_provider.dart';
 import 'games/quiz.dart';
 import 'games/pickTwo.dart';
 import 'games/emoTi.dart';
@@ -43,7 +46,7 @@ void _onButtonTap(String action, BuildContext context) {
 }
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
-  int energy = 5; // Set to 5 for testing sleep mode
+  int energy = 100; // Set to 5 for testing sleep mode
   int coins = 1250;
   bool isPremium = false;
   bool isSleeping = false;
@@ -52,7 +55,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late AnimationController _sleepController;
   late Animation<double> _sleepAnimation;
   Timer? _energyRechargeTimer;
-  
+
   // Fun Facts System
   Timer? _funFactTimer;
   String? _currentFunFact;
@@ -60,8 +63,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late AnimationController _funFactController;
   late Animation<double> _funFactAnimation;
   late Animation<Offset> _funFactSlideAnimation;
-
-  // List of fun facts about Vietnamese water puppetry and culture
   final List<String> _funFacts = [
     "🎭 Water puppetry originated over 1000 years ago in the Red River Delta!",
     "💧 Traditional shows feature live folk music with drums, gongs, and wooden bells.",
@@ -75,15 +76,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     "🌟 UNESCO recognized water puppetry as Intangible Cultural Heritage.",
   ];
 
+  // Storage System
+  List<Map<String, dynamic>> inventory = [];
+  String? equippedSkin;
+  File? _storageFile;
+
   @override
   void initState() {
     super.initState();
-
     _heartController = AnimationController(
       duration: Duration(milliseconds: 1500),
       vsync: this,
     );
-
     _heartAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -96,7 +100,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       duration: Duration(milliseconds: 1000),
       vsync: this,
     );
-
     _sleepAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -105,12 +108,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       curve: Curves.easeInOut,
     ));
 
-    // Initialize fun fact animations
     _funFactController = AnimationController(
       duration: Duration(milliseconds: 800),
       vsync: this,
     );
-
     _funFactAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -118,7 +119,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       parent: _funFactController,
       curve: Curves.elasticOut,
     ));
-
     _funFactSlideAnimation = Tween<Offset>(
       begin: Offset(0, -1),
       end: Offset(0, 0),
@@ -127,44 +127,61 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       curve: Curves.easeOutBack,
     ));
 
-    // Start the fun fact timer only if not sleeping
+    // Initialize storage
+    _initStorage();
+
+    // Start fun fact timer if not sleeping
     if (energy >= 10) {
       _startFunFactTimer();
     }
 
-    // Check if should start in sleep mode
+    // Check for sleep mode
     if (energy < 10) {
       _enterSleepMode();
     }
   }
 
-  void _startFunFactTimer() {
-    if (isSleeping) return; // Don't show fun facts while sleeping
-    
-    // Random interval between 15-45 seconds
-    int randomSeconds = 15 + Random().nextInt(30);
+  Future<void> _initStorage() async {
+    final directory = await getApplicationDocumentsDirectory();
+    _storageFile = File('${directory.path}/storage.json');
+    if (await _storageFile!.exists()) {
+      final content = await _storageFile!.readAsString();
+      final data = jsonDecode(content);
+      setState(() {
+        inventory = List<Map<String, dynamic>>.from(data['inventory'] ?? []);
+        equippedSkin = data['equippedSkin'];
+      });
+    } else {
+      await _saveStorage();
+    }
+  }
 
+  Future<void> _saveStorage() async {
+    if (_storageFile == null) return;
+    final data = {
+      'inventory': inventory,
+      'equippedSkin': equippedSkin,
+    };
+    await _storageFile!.writeAsString(jsonEncode(data));
+  }
+
+  void _startFunFactTimer() {
+    if (isSleeping) return;
+    int randomSeconds = 15 + Random().nextInt(30);
     _funFactTimer = Timer(Duration(seconds: randomSeconds), () {
       _showRandomFunFact();
-      _startFunFactTimer(); // Schedule next fun fact
+      _startFunFactTimer();
     });
   }
 
   void _showRandomFunFact() {
     if (!mounted || isSleeping) return;
-    
-    // Pick a random fun fact
     String randomFact = _funFacts[Random().nextInt(_funFacts.length)];
-
     setState(() {
       _currentFunFact = randomFact;
       _showFunFact = true;
     });
-
-    // Show the fun fact with animation
     _funFactController.forward();
-
-    // Hide the fun fact after 4 seconds
     Timer(Duration(seconds: 4), () {
       if (mounted) {
         _funFactController.reverse().then((_) {
@@ -183,19 +200,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     setState(() {
       isSleeping = true;
     });
-    
     _sleepController.forward();
-    _funFactTimer?.cancel(); // Stop fun facts during sleep
-    
-    // Start energy recharge timer (recharge 1 energy every 10 seconds)
+    _funFactTimer?.cancel();
     _energyRechargeTimer = Timer.periodic(Duration(seconds: 10), (timer) {
       if (mounted && isSleeping) {
         setState(() {
           if (energy < 100) {
             energy = (energy + 1).clamp(0, 100);
           }
-          
-          // Auto-wake up when energy reaches 50%
           if (energy >= 90) {
             _wakeUp();
             timer.cancel();
@@ -211,14 +223,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     setState(() {
       isSleeping = false;
     });
-    
     _sleepController.reverse();
     _energyRechargeTimer?.cancel();
-    
-    // Restart fun fact timer
     _startFunFactTimer();
-    
-    // Show wake up message
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Your puppet is refreshed and ready to play! 🌟'),
@@ -241,19 +248,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  @override
-  void dispose() {
-    _heartController.dispose();
-    _sleepController.dispose();
-    _funFactController.dispose();
-    _funFactTimer?.cancel();
-    _energyRechargeTimer?.cancel();
-    super.dispose();
-  }
-
   void _onCharacterTap() {
     if (isSleeping) {
-      // Show different message when sleeping
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Shh... your puppet is sleeping! 😴'),
@@ -263,30 +259,87 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       );
       return;
     }
-
     HapticFeedback.lightImpact();
     _heartController.forward().then((_) {
       _heartController.reverse();
     });
-
     setState(() {
       if (energy > 5) {
         energy -= 5;
-        
-        // Check if energy drops below 10% after interaction
         if (energy < 10) {
-          // Delay sleep mode slightly to show the interaction
           Timer(Duration(milliseconds: 500), () {
             _enterSleepMode();
           });
         }
       }
     });
-
-    // Chance to trigger immediate fun fact on character tap
-    if (Random().nextInt(4) == 0 && !_showFunFact && !isSleeping) { // 25% chance
+    if (Random().nextInt(4) == 0 && !_showFunFact && !isSleeping) {
       _showRandomFunFact();
     }
+  }
+
+  void _openShop() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ShopPage(
+          coins: coins,
+          onPurchase: (int newCoins, Map<String, dynamic> item) {
+            setState(() {
+              coins = newCoins;
+              inventory.add(item);
+              _saveStorage();
+            });
+          },
+        ),
+      ),
+    );
+  }
+
+  void _openStorage() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => StoragePage(
+          inventory: inventory,
+          equippedSkin: equippedSkin,
+          onUseWater: (String waterType) {
+            setState(() {
+              int energyBoost = 0;
+              if (waterType == 'Spring Water') {
+                energyBoost = 20;
+              } else if (waterType == 'Rain Water') {
+                energyBoost = 50;
+              } else if (waterType == 'River Water') {
+                energyBoost = 80;
+              }
+              energy = (energy + energyBoost).clamp(0, 100);
+              inventory.removeWhere((item) => item['name'] == waterType && item['type'] == 'water');
+              if (isSleeping && energy >= 10) {
+                _wakeUp();
+              }
+              _saveStorage();
+            });
+          },
+          onEquipSkin: (String skinName) {
+            setState(() {
+              equippedSkin = skinName;
+              _saveStorage();
+            });
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _heartController.dispose();
+    _sleepController.dispose();
+    _funFactController.dispose();
+    _funFactTimer?.cancel();
+    _energyRechargeTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -309,7 +362,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
             ),
             child: Container(
-              // Add dark overlay when sleeping
               decoration: isSleeping
                   ? BoxDecoration(
                       color: Colors.black.withOpacity(_sleepAnimation.value * 0.6),
@@ -320,30 +372,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   children: [
                     Column(
                       children: [
-                        // Top HUD
                         _buildTopHUD(),
-                        
-                        // Character Area
                         Expanded(
                           flex: 3,
                           child: _buildCharacterArea(),
                         ),
-                        
-                        // Main Action Button (Play Games or Sleep)
                         _buildMainActionButton(),
-                        
-                        // Daily Reward
                         if (!isSleeping) _buildDailyReward(),
-                        
                         SizedBox(height: 20),
                       ],
                     ),
-                    
-                    // Fun Fact Overlay (hidden during sleep)
                     if (_showFunFact && _currentFunFact != null && !isSleeping)
                       _buildFunFactOverlay(),
-                      
-                    // Sleep Mode Overlay
                     if (isSleeping) _buildSleepOverlay(),
                   ],
                 ),
@@ -365,7 +405,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Sleeping icon with animation
             AnimatedBuilder(
               animation: _sleepAnimation,
               builder: (context, child) {
@@ -411,7 +450,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
             ),
             SizedBox(height: 20),
-            // Wake up button (only if energy is above 20%)
             if (energy >= 5)
               ElevatedButton(
                 onPressed: _wakeUp,
@@ -446,7 +484,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         scale: _funFactAnimation,
         child: Stack(
           children: [
-            // Speech bubble
             Container(
               margin: EdgeInsets.only(bottom: 20),
               child: CustomPaint(
@@ -543,11 +580,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Energy Bar
           Container(
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: energy < 10 
+              color: energy < 10
                   ? (isSleeping ? Colors.indigo.shade600 : Colors.red.shade400)
                   : Colors.blue.shade400,
               borderRadius: BorderRadius.circular(20),
@@ -562,11 +598,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             child: Row(
               children: [
                 Icon(
-                  energy < 10 
-                      ? (isSleeping ? Icons.bedtime : Icons.battery_alert) 
-                      : Icons.water_drop, 
-                  color: Colors.white, 
-                  size: 16
+                  energy < 10
+                      ? (isSleeping ? Icons.bedtime : Icons.battery_alert)
+                      : Icons.water_drop,
+                  color: Colors.white,
+                  size: 16,
                 ),
                 SizedBox(width: 4),
                 Text(
@@ -580,8 +616,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ],
             ),
           ),
-
-          // Coins
           Container(
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
@@ -610,10 +644,68 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ],
             ),
           ),
-
-          // Premium, Sleep & Settings
           Row(
             children: [
+              // Daily Reward Button
+              GestureDetector(
+                onTap: () => _onButtonTap('Daily Reward', context),
+                child: Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isSleeping ? Colors.grey.shade700 : Colors.amber.shade400,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Icon(Icons.card_giftcard, color: Colors.white, size: 20),
+                ),
+              ),
+              SizedBox(width: 8),
+              // Shop Button
+              GestureDetector(
+                onTap: isSleeping ? null : _openShop,
+                child: Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isSleeping ? Colors.grey.shade700 : Colors.green.shade400,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Icon(Icons.store, color: Colors.white, size: 20),
+                ),
+              ),
+              SizedBox(width: 8),
+              // Storage Button
+              GestureDetector(
+                onTap: isSleeping ? null : _openStorage,
+                child: Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isSleeping ? Colors.grey.shade700 : Colors.blue.shade600,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Icon(Icons.inventory, color: Colors.white, size: 20),
+                ),
+              ),
+              SizedBox(width: 8),
               GestureDetector(
                 onTap: () => _onButtonTap('Premium', context),
                 child: Container(
@@ -634,7 +726,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
               SizedBox(width: 8),
               GestureDetector(
-                onTap: isSleeping ? null : _forceSleep, // Disable when already sleeping
+                onTap: isSleeping ? null : _forceSleep,
                 child: Container(
                   padding: EdgeInsets.all(8),
                   decoration: BoxDecoration(
@@ -694,7 +786,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         borderRadius: BorderRadius.circular(20),
         child: Stack(
           children: [
-            // 3D Character Model
             GestureDetector(
               onTap: _onCharacterTap,
               child: Container(
@@ -705,7 +796,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   src: 'assets/glb/c_neutral.glb',
                   alt: 'Water Puppet Character',
                   ar: false,
-                  autoRotate: !isSleeping, // Stop rotation when sleeping
+                  autoRotate: !isSleeping,
                   autoRotateDelay: 3000,
                   rotationPerSecond: '30deg',
                   cameraControls: true,
@@ -720,8 +811,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 ),
               ),
             ),
-
-            // Heart Animation
             if (!isSleeping)
               Positioned(
                 top: 20,
@@ -740,8 +829,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   },
                 ),
               ),
-            
-            // Tap instruction
             Positioned(
               bottom: 10,
               left: 0,
@@ -764,6 +851,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 ),
               ),
             ),
+            // Display equipped skin name (for now, as placeholder)
+            if (equippedSkin != null)
+              Positioned(
+                top: 10,
+                left: 10,
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade400,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    'Skin: $equippedSkin',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -776,11 +884,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       child: ElevatedButton(
         onPressed: () {
           if (isSleeping) {
-            return; // Do nothing when sleeping
+            return;
           } else if (energy < 10) {
             _forceSleep();
           } else {
-            // Navigate to game selection
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -791,8 +898,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     setState(() {
                       energy = newEnergy;
                       coins = newCoins;
-                      
-                      // Check if energy drops below 10% after game
                       if (energy < 10) {
                         Timer(Duration(milliseconds: 500), () {
                           _enterSleepMode();
@@ -806,8 +911,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           }
         },
         style: ElevatedButton.styleFrom(
-          backgroundColor: isSleeping 
-              ? Colors.grey.shade600 
+          backgroundColor: isSleeping
+              ? Colors.grey.shade600
               : (energy < 10 ? Colors.indigo.shade500 : Colors.red.shade500),
           foregroundColor: Colors.white,
           padding: EdgeInsets.symmetric(vertical: 16),
@@ -820,15 +925,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              isSleeping 
-                  ? Icons.bedtime 
-                  : (energy < 10 ? Icons.bedtime : Icons.games), 
-              size: 24
+              isSleeping
+                  ? Icons.bedtime
+                  : (energy < 10 ? Icons.bedtime : Icons.games),
+              size: 24,
             ),
             SizedBox(width: 10),
             Text(
-              isSleeping 
-                  ? 'SLEEPING...' 
+              isSleeping
+                  ? 'SLEEPING...'
                   : (energy < 10 ? 'GO TO SLEEP' : 'PLAY GAMES'),
               style: TextStyle(
                 fontSize: 18,
@@ -861,7 +966,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             Icon(Icons.card_giftcard, size: 20),
             SizedBox(width: 8),
             Text(
-              'Daily Reward Available!',
+              'Daily Reward',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
@@ -880,27 +985,247 @@ class SpeechBubblePainter extends CustomPainter {
     final paint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.fill;
-
     final path = Path();
     final radius = 20.0;
-
-    // Main rounded rectangle
     path.addRRect(RRect.fromRectAndRadius(
       Rect.fromLTWH(0, 0, size.width, size.height - 10),
       Radius.circular(radius),
     ));
-
-    // Triangle for speech tail
     path.moveTo(size.width / 2 - 10, size.height - 10);
     path.lineTo(size.width / 2, size.height);
     path.lineTo(size.width / 2 + 10, size.height - 10);
     path.close();
-
     canvas.drawPath(path, paint);
   }
 
   @override
   bool shouldRepaint(CustomPainter oldDelegate) => false;
+}
+
+class ShopPage extends StatelessWidget {
+  final int coins;
+  final Function(int, Map<String, dynamic>) onPurchase;
+
+  ShopPage({required this.coins, required this.onPurchase});
+
+  final List<Map<String, dynamic>> shopItems = [
+    {'name': 'Spring Water', 'type': 'water', 'price': 100, 'energy': 20},
+    {'name': 'Rain Water', 'type': 'water', 'price': 250, 'energy': 50},
+    {'name': 'River Water', 'type': 'water', 'price': 400, 'energy': 80},
+    {'name': 'Bamboo Skin', 'type': 'skin', 'price': 500},
+    {'name': 'Lotus Skin', 'type': 'skin', 'price': 750},
+    {'name': 'Dragon Skin', 'type': 'skin', 'price': 1000},
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.blue.shade400,
+        title: Text('Shop', style: TextStyle(color: Colors.white)),
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF7FB069), Color(0xFF2F5233)],
+          ),
+        ),
+        child: ListView.builder(
+          padding: EdgeInsets.all(16),
+          itemCount: shopItems.length,
+          itemBuilder: (context, index) {
+            final item = shopItems[index];
+            return Card(
+              color: Colors.white.withOpacity(0.9),
+              margin: EdgeInsets.symmetric(vertical: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(15),
+              ),
+              child: ListTile(
+                leading: Icon(
+                  item['type'] == 'water' ? Icons.water_drop : Icons.color_lens,
+                  color: Colors.blue.shade600,
+                  size: 30,
+                ),
+                title: Text(
+                  item['name'],
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                subtitle: Text(
+                  item['type'] == 'water'
+                      ? 'Restores ${item['energy']}% energy'
+                      : 'Decorative skin (no visual change)',
+                  style: TextStyle(color: Colors.grey.shade600),
+                ),
+                trailing: ElevatedButton(
+                  onPressed: coins >= item['price']
+                      ? () {
+                          HapticFeedback.selectionClick();
+                          onPurchase(coins - item['price'], item);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Purchased ${item['name']}!'),
+                              duration: Duration(seconds: 1),
+                              backgroundColor: Colors.green.shade600,
+                            ),
+                          );
+                          Navigator.pop(context);
+                        }
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber.shade400,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: Text('${item['price']} Coins'),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class StoragePage extends StatelessWidget {
+  final List<Map<String, dynamic>> inventory;
+  final String? equippedSkin;
+  final Function(String) onUseWater;
+  final Function(String) onEquipSkin;
+
+  StoragePage({
+    required this.inventory,
+    required this.equippedSkin,
+    required this.onUseWater,
+    required this.onEquipSkin,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Colors.blue.shade400,
+        title: Text('Storage', style: TextStyle(color: Colors.white)),
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF7FB069), Color(0xFF2F5233)],
+          ),
+        ),
+        child: inventory.isEmpty
+            ? Center(
+                child: Text(
+                  'Storage is empty!',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              )
+            : ListView.builder(
+                padding: EdgeInsets.all(16),
+                itemCount: inventory.length,
+                itemBuilder: (context, index) {
+                  final item = inventory[index];
+                  return Card(
+                    color: Colors.white.withOpacity(0.9),
+                    margin: EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: ListTile(
+                      leading: Icon(
+                        item['type'] == 'water' ? Icons.water_drop : Icons.color_lens,
+                        color: Colors.blue.shade600,
+                        size: 30,
+                      ),
+                      title: Text(
+                        item['name'],
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                      subtitle: Text(
+                        item['type'] == 'water'
+                            ? 'Restores ${item['energy']}% energy'
+                            : item['name'] == equippedSkin
+                                ? 'Equipped'
+                                : 'Decorative skin',
+                        style: TextStyle(color: Colors.grey.shade600),
+                      ),
+                      trailing: item['type'] == 'water'
+                          ? ElevatedButton(
+                              onPressed: () {
+                                HapticFeedback.selectionClick();
+                                onUseWater(item['name']);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Used ${item['name']}!'),
+                                    duration: Duration(seconds: 1),
+                                    backgroundColor: Colors.green.shade600,
+                                  ),
+                                );
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue.shade400,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              child: Text('Use'),
+                            )
+                          : ElevatedButton(
+                              onPressed: item['name'] == equippedSkin
+                                  ? null
+                                  : () {
+                                      HapticFeedback.selectionClick();
+                                      onEquipSkin(item['name']);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('Equipped ${item['name']}!'),
+                                          duration: Duration(seconds: 1),
+                                          backgroundColor: Colors.green.shade600,
+                                        ),
+                                      );
+                                    },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.amber.shade400,
+                                foregroundColor: Colors.white,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                              child: Text(item['name'] == equippedSkin ? 'Equipped' : 'Equip'),
+                            ),
+                    ),
+                  );
+                },
+              ),
+      ),
+    );
+  }
 }
 
 class GameSelectionPage extends StatelessWidget {
@@ -931,7 +1256,6 @@ class GameSelectionPage extends StatelessWidget {
         child: SafeArea(
           child: Column(
             children: [
-              // Top Bar with Back Button
               Padding(
                 padding: EdgeInsets.all(16),
                 child: Row(
@@ -963,11 +1287,10 @@ class GameSelectionPage extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    SizedBox(width: 40), // Balance layout
+                    SizedBox(width: 40),
                   ],
                 ),
               ),
-              // Game List
               Expanded(
                 child: ListView(
                   padding: EdgeInsets.symmetric(horizontal: 20),
@@ -1034,7 +1357,7 @@ class GameSelectionPage extends StatelessWidget {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => EmoTiGame(
+                              builder: (context) => QuizGame(
                                 energy: energy,
                                 coins: coins,
                                 onGameComplete: onGameComplete,
@@ -1062,7 +1385,11 @@ class GameSelectionPage extends StatelessWidget {
     );
   }
 
-  Widget _buildGameButton(BuildContext context, {required String title, required IconData icon, required Color color, required VoidCallback onTap}) {
+  Widget _buildGameButton(BuildContext context,
+      {required String title,
+      required IconData icon,
+      required Color color,
+      required VoidCallback onTap}) {
     return Container(
       margin: EdgeInsets.symmetric(vertical: 10),
       child: ElevatedButton(
