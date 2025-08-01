@@ -42,11 +42,15 @@ void _onButtonTap(String action, BuildContext context) {
 }
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
-  int energy = 85;
+  int energy = 5; // Set to 5 for testing sleep mode
   int coins = 1250;
   bool isPremium = false;
+  bool isSleeping = false;
   late AnimationController _heartController;
   late Animation<double> _heartAnimation;
+  late AnimationController _sleepController;
+  late Animation<double> _sleepAnimation;
+  Timer? _energyRechargeTimer;
   
   // Fun Facts System
   Timer? _funFactTimer;
@@ -87,6 +91,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       curve: Curves.elasticOut,
     ));
 
+    _sleepController = AnimationController(
+      duration: Duration(milliseconds: 1000),
+      vsync: this,
+    );
+
+    _sleepAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _sleepController,
+      curve: Curves.easeInOut,
+    ));
+
     // Initialize fun fact animations
     _funFactController = AnimationController(
       duration: Duration(milliseconds: 800),
@@ -109,11 +126,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       curve: Curves.easeOutBack,
     ));
 
-    // Start the fun fact timer
-    _startFunFactTimer();
+    // Start the fun fact timer only if not sleeping
+    if (energy >= 10) {
+      _startFunFactTimer();
+    }
+
+    // Check if should start in sleep mode
+    if (energy < 10) {
+      _enterSleepMode();
+    }
   }
 
   void _startFunFactTimer() {
+    if (isSleeping) return; // Don't show fun facts while sleeping
+    
     // Random interval between 15-45 seconds
     int randomSeconds = 15 + Random().nextInt(30);
     
@@ -124,7 +150,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _showRandomFunFact() {
-    if (!mounted) return;
+    if (!mounted || isSleeping) return;
     
     // Pick a random fun fact
     String randomFact = _funFacts[Random().nextInt(_funFacts.length)];
@@ -152,15 +178,91 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     });
   }
 
+  void _enterSleepMode() {
+    setState(() {
+      isSleeping = true;
+    });
+    
+    _sleepController.forward();
+    _funFactTimer?.cancel(); // Stop fun facts during sleep
+    
+    // Start energy recharge timer (recharge 1 energy every 10 seconds)
+    _energyRechargeTimer = Timer.periodic(Duration(seconds: 10), (timer) {
+      if (mounted && isSleeping) {
+        setState(() {
+          if (energy < 100) {
+            energy = (energy + 1).clamp(0, 100);
+          }
+          
+          // Auto-wake up when energy reaches 50%
+          if (energy >= 50) {
+            _wakeUp();
+            timer.cancel();
+          }
+        });
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  void _wakeUp() {
+    setState(() {
+      isSleeping = false;
+    });
+    
+    _sleepController.reverse();
+    _energyRechargeTimer?.cancel();
+    
+    // Restart fun fact timer
+    _startFunFactTimer();
+    
+    // Show wake up message
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Your puppet is refreshed and ready to play! 🌟'),
+        duration: Duration(seconds: 2),
+        backgroundColor: Colors.green.shade600,
+      ),
+    );
+  }
+
+  void _forceSleep() {
+    if (!isSleeping) {
+      _enterSleepMode();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Your puppet is now sleeping to recharge... 😴'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.indigo.shade600,
+        ),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _heartController.dispose();
+    _sleepController.dispose();
     _funFactController.dispose();
     _funFactTimer?.cancel();
+    _energyRechargeTimer?.cancel();
     super.dispose();
   }
 
   void _onCharacterTap() {
+    if (isSleeping) {
+      // Show different message when sleeping
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Shh... your puppet is sleeping! 😴'),
+          duration: Duration(seconds: 1),
+          backgroundColor: Colors.indigo.shade600,
+        ),
+      );
+      return;
+    }
+
     HapticFeedback.lightImpact();
     _heartController.forward().then((_) {
       _heartController.reverse();
@@ -169,54 +271,166 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     setState(() {
       if (energy > 5) {
         energy -= 5;
+        
+        // Check if energy drops below 10% after interaction
+        if (energy < 10) {
+          // Delay sleep mode slightly to show the interaction
+          Timer(Duration(milliseconds: 500), () {
+            _enterSleepMode();
+          });
+        }
       }
     });
 
     // Chance to trigger immediate fun fact on character tap
-    if (Random().nextInt(4) == 0 && !_showFunFact) { // 25% chance
+    if (Random().nextInt(4) == 0 && !_showFunFact && !isSleeping) { // 25% chance
       _showRandomFunFact();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage('assets/img/background.png'),
-            fit: BoxFit.cover,
-          ),
-        ),
-        child: SafeArea(
-          child: Stack(
-            children: [
-              Column(
-                children: [
-                  // Top HUD
-                  _buildTopHUD(),
-                  
-                  // Character Area
-                  Expanded(
-                    flex: 3,
-                    child: _buildCharacterArea(),
-                  ),
-                  
-                  // Main Action Button
-                  _buildPlayGamesButton(),
-                  
-                  // Daily Reward
-                  _buildDailyReward(),
-                  
-                  SizedBox(height: 20),
-                ],
+    return AnimatedBuilder(
+      animation: _sleepAnimation,
+      builder: (context, child) {
+        return Scaffold(
+          body: Container(
+            decoration: BoxDecoration(
+              image: DecorationImage(
+                image: AssetImage('assets/img/background.png'),
+                fit: BoxFit.cover,
+                colorFilter: isSleeping
+                    ? ColorFilter.mode(
+                        Colors.indigo.shade900.withOpacity(0.7),
+                        BlendMode.overlay,
+                      )
+                    : null,
               ),
-              
-              // Fun Fact Overlay
-              if (_showFunFact && _currentFunFact != null)
-                _buildFunFactOverlay(),
-            ],
+            ),
+            child: Container(
+              // Add dark overlay when sleeping
+              decoration: isSleeping
+                  ? BoxDecoration(
+                      color: Colors.black.withOpacity(_sleepAnimation.value * 0.6),
+                    )
+                  : null,
+              child: SafeArea(
+                child: Stack(
+                  children: [
+                    Column(
+                      children: [
+                        // Top HUD
+                        _buildTopHUD(),
+                        
+                        // Character Area
+                        Expanded(
+                          flex: 3,
+                          child: _buildCharacterArea(),
+                        ),
+                        
+                        // Main Action Button (Play Games or Sleep)
+                        _buildMainActionButton(),
+                        
+                        // Daily Reward
+                        if (!isSleeping) _buildDailyReward(),
+                        
+                        SizedBox(height: 20),
+                      ],
+                    ),
+                    
+                    // Fun Fact Overlay (hidden during sleep)
+                    if (_showFunFact && _currentFunFact != null && !isSleeping)
+                      _buildFunFactOverlay(),
+                      
+                    // Sleep Mode Overlay
+                    if (isSleeping) _buildSleepOverlay(),
+                  ],
+                ),
+              ),
+            ),
           ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSleepOverlay() {
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Sleeping icon with animation
+            AnimatedBuilder(
+              animation: _sleepAnimation,
+              builder: (context, child) {
+                return Transform.scale(
+                  scale: 0.8 + (_sleepAnimation.value * 0.2),
+                  child: Container(
+                    padding: EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.indigo.shade800.withOpacity(0.9),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black54,
+                          blurRadius: 20,
+                          offset: Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      Icons.bedtime,
+                      color: Colors.white,
+                      size: 60,
+                    ),
+                  ),
+                );
+              },
+            ),
+            SizedBox(height: 20),
+            Text(
+              'Sleeping...',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            SizedBox(height: 10),
+            Text(
+              'Recharging energy',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 16,
+              ),
+            ),
+            SizedBox(height: 20),
+            // Wake up button (only if energy is above 20%)
+            if (energy >= 20)
+              ElevatedButton(
+                onPressed: _wakeUp,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange.shade400,
+                  foregroundColor: Colors.white,
+                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+                child: Text(
+                  'Wake Up',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -332,7 +546,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           Container(
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.blue.shade400,
+              color: energy < 10 
+                  ? (isSleeping ? Colors.indigo.shade600 : Colors.red.shade400)
+                  : Colors.blue.shade400,
               borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
@@ -344,7 +560,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
             child: Row(
               children: [
-                Icon(Icons.water_drop, color: Colors.white, size: 16),
+                Icon(
+                  energy < 10 
+                      ? (isSleeping ? Icons.bedtime : Icons.battery_alert) 
+                      : Icons.water_drop, 
+                  color: Colors.white, 
+                  size: 16
+                ),
                 SizedBox(width: 4),
                 Text(
                   '$energy%',
@@ -362,7 +584,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           Container(
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.amber.shade400,
+              color: isSleeping ? Colors.grey.shade600 : Colors.amber.shade400,
               borderRadius: BorderRadius.circular(20),
               boxShadow: [
                 BoxShadow(
@@ -396,7 +618,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 child: Container(
                   padding: EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.orange.shade400,
+                    color: isSleeping ? Colors.grey.shade700 : Colors.orange.shade400,
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
@@ -435,7 +657,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-
   Widget _buildCharacterArea() {
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 20),
@@ -464,7 +685,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   src: 'assets/glb/c_neutral.glb',
                   alt: 'Water Puppet Character',
                   ar: false,
-                  autoRotate: true,
+                  autoRotate: !isSleeping, // Stop rotation when sleeping
                   autoRotateDelay: 3000,
                   rotationPerSecond: '30deg',
                   cameraControls: true,
@@ -481,25 +702,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
             
             // Heart Animation
-            Positioned(
-              top: 20,
-              right: 20,
-              child: AnimatedBuilder(
-                animation: _heartAnimation,
-                builder: (context, child) {
-                  return Transform.scale(
-                    scale: _heartAnimation.value,
-                    child: Icon(
-                      Icons.favorite,
-                      color: Colors.red,
-                      size: 30,
-                    ),
-                  );
-                },
+            if (!isSleeping)
+              Positioned(
+                top: 20,
+                right: 20,
+                child: AnimatedBuilder(
+                  animation: _heartAnimation,
+                  builder: (context, child) {
+                    return Transform.scale(
+                      scale: _heartAnimation.value,
+                      child: Icon(
+                        Icons.favorite,
+                        color: Colors.red,
+                        size: 30,
+                      ),
+                    );
+                  },
+                ),
               ),
-            ),
             
-            // Tap instruction (optional)
+            // Tap instruction
             Positioned(
               bottom: 10,
               left: 0,
@@ -512,7 +734,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     borderRadius: BorderRadius.circular(15),
                   ),
                   child: Text(
-                    'Tap to interact!',
+                    isSleeping ? 'Sleeping...' : 'Tap to interact!',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 12,
@@ -528,43 +750,66 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildPlayGamesButton() {
+  Widget _buildMainActionButton() {
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       child: ElevatedButton(
         onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => GameSelectionPage(
-                energy: energy,
-                coins: coins,
-                onGameComplete: (newEnergy, newCoins) {
-                  setState(() {
-                    energy = newEnergy;
-                    coins = newCoins;
-                  });
-                },
+          if (isSleeping) {
+            return; // Do nothing when sleeping
+          } else if (energy < 10) {
+            _forceSleep();
+          } else {
+            // Navigate to game selection
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => GameSelectionPage(
+                  energy: energy,
+                  coins: coins,
+                  onGameComplete: (newEnergy, newCoins) {
+                    setState(() {
+                      energy = newEnergy;
+                      coins = newCoins;
+                      
+                      // Check if energy drops below 10% after game
+                      if (energy < 10) {
+                        Timer(Duration(milliseconds: 500), () {
+                          _enterSleepMode();
+                        });
+                      }
+                    });
+                  },
+                ),
               ),
-            ),
-          );
+            );
+          }
         },
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.red.shade500,
+          backgroundColor: isSleeping 
+              ? Colors.grey.shade600 
+              : (energy < 10 ? Colors.indigo.shade500 : Colors.red.shade500),
           foregroundColor: Colors.white,
           padding: EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(25),
           ),
-          elevation: 8,
+          elevation: isSleeping ? 2 : 8,
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.games, size: 24),
+            Icon(
+              isSleeping 
+                  ? Icons.bedtime 
+                  : (energy < 10 ? Icons.bedtime : Icons.games), 
+              size: 24
+            ),
             SizedBox(width: 10),
             Text(
-              'PLAY GAMES',
+              isSleeping 
+                  ? 'SLEEPING...' 
+                  : (energy < 10 ? 'GO TO SLEEP' : 'PLAY GAMES'),
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
@@ -608,6 +853,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 }
+
 class SpeechBubblePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
@@ -636,7 +882,6 @@ class SpeechBubblePainter extends CustomPainter {
   @override
   bool shouldRepaint(CustomPainter oldDelegate) => false;
 }
-
 
 class GameSelectionPage extends StatelessWidget {
   final int energy;
