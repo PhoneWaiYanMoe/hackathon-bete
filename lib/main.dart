@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'games/quiz.dart';
 import 'games/pickTwo.dart';
 import 'games/emoTi.dart';
+import 'games/storyWeaver.dart';
 
 void main() {
   runApp(WaterPuppetApp());
@@ -1070,7 +1071,7 @@ class ShopPage extends StatelessWidget {
                   onPressed: coins >= item['price']
                       ? () {
                           HapticFeedback.selectionClick();
-                          onPurchase(coins - item['price'], item);
+                          onPurchase(coins - (item['price'] as num).toInt(), item);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text('Purchased ${item['name']}!'),
@@ -1334,6 +1335,34 @@ class GameSelectionPage extends StatelessWidget {
                             context,
                             MaterialPageRoute(
                               builder: (context) => PickTwoGame(),
+                            ),
+                          );
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Not enough energy! Need 10%.'),
+                              duration: Duration(seconds: 2),
+                              backgroundColor: Colors.red.shade600,
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                    _buildGameButton(
+                      context,
+                      title: 'Story Weaver',
+                      icon: Icons.book,
+                      color: Colors.green.shade400,
+                      onTap: () {
+                        if (energy >= 10) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => StoryWeaverGame(
+                                energy: energy,
+                                coins: coins,
+                                onGameComplete: onGameComplete,
+                              ),
                             ),
                           );
                         } else {
