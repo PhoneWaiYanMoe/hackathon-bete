@@ -17,7 +17,7 @@ class SpeechEmotionService {
   List<Map<String, dynamic>> _emotionResults = [];
   
   // Backend URL - Update this to your Flask server URL
-  static const String _backendUrl = 'http://172.28.240.138'; // Change to your server IP
+  static const String _backendUrl = 'http://172.28.240.138:5000'; // Change to your server IP
   // For Android emulator: 'http://10.0.2.2:5000'
   // For iOS simulator: 'http://localhost:5000'
   // For real device: 'http://YOUR_COMPUTER_IP:5000'

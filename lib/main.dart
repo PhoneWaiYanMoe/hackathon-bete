@@ -87,7 +87,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   // Speech and Emotion System
   final SpeechEmotionService _speechService = SpeechEmotionService();
-  String _currentGlb = 'assets/glb/c_neutral.glb';
+  String _currentGlb = 'assets/glb/c_smile.glb';
   String _transcribedText = '';
   String _dominantEmotion = '';
   List<Map<String, dynamic>> _emotionResults = [];
@@ -362,41 +362,49 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  void _updateEmotionResults(String status, String text, List<Map<String, dynamic>> emotions) {
+ void _updateEmotionResults(String status, String text, List<Map<String, dynamic>> emotions) {
     setState(() {
       _status = status;
       _transcribedText = text;
       _emotionResults = emotions;
       _dominantEmotion = emotions.isNotEmpty ? '${emotions[0]['label']} (${(emotions[0]['score'] * 100).toStringAsFixed(2)}%)' : '';
+      print('Updating emotion to: ${emotions.isNotEmpty ? emotions[0]['label'] : 'none'}'); // Debug log
       _updateGlbModel(emotions.isNotEmpty ? emotions[0]['label'] : 'neutral');
     });
   }
 
   void _updateGlbModel(String emotion) {
-    switch (emotion.toLowerCase()) {
+    String newGlb = _currentGlb; // Default to current GLB
+    switch (emotion.toLowerCase().trim()) { // Case-insensitive and trim whitespace
       case 'angry':
       case 'anger':
-        _currentGlb = 'assets/glb/c_angry.glb';
+        newGlb = 'assets/glb/c_angry.glb';
         break;
-      case 'sad':
+      case 'sadness':
       case 'negative':
-        _currentGlb = 'assets/glb/c_cry.glb';
+        newGlb = 'assets/glb/c_cry.glb';
         break;
       case 'disgust':
-        _currentGlb = 'assets/glb/c_disgust.glb';
+        newGlb = 'assets/glb/c_disgust.glb';
         break;
       case 'happy':
-      case 'positive':
-        _currentGlb = 'assets/glb/c_smile.glb';
+      case 'smile':
+        newGlb = 'assets/glb/c_smile.glb';
         break;
       case 'neutral':
       default:
-        _currentGlb = 'assets/glb/c_neutral.glb';
+        newGlb = 'assets/glb/c_neutral.glb';
         break;
+    }
+    if (newGlb != _currentGlb) {
+      setState(() {
+        _currentGlb = newGlb; // Update state only if different
+        print('Switching to GLB: $_currentGlb'); // Debug GLB change
+      });
     }
   }
 
-  @override
+ @override
   void dispose() {
     _heartController.dispose();
     _sleepController.dispose();
@@ -460,6 +468,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+ 
   Widget _buildSleepOverlay() {
     return Positioned(
       top: 0,
@@ -831,7 +840,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildCharacterArea() {
+   Widget _buildCharacterArea() {
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
@@ -854,6 +863,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 width: double.infinity,
                 height: double.infinity,
                 child: ModelViewer(
+                  key: ValueKey(_currentGlb), // Add unique key to force reload
                   backgroundColor: Colors.transparent,
                   src: equippedSkin != null && !isSleeping
                       ? 'assets/glb/$equippedSkin.glb'
