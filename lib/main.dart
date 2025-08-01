@@ -6,9 +6,12 @@ import 'dart:math';
 import 'dart:io';
 import 'dart:convert';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'speech_emotion_service.dart';
 import 'games/quiz.dart';
 import 'games/pickTwo.dart';
 import 'games/emoTi.dart';
+import 'games/storyWeaver.dart';
 
 void main() {
   runApp(WaterPuppetApp());
@@ -46,7 +49,7 @@ void _onButtonTap(String action, BuildContext context) {
 }
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
-  int energy = 100; // Set to 5 for testing sleep mode
+  int energy = 100;
   int coins = 1250;
   bool isPremium = false;
   bool isSleeping = false;
@@ -80,6 +83,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   List<Map<String, dynamic>> inventory = [];
   String? equippedSkin;
   File? _storageFile;
+
+  // Speech and Emotion System
+  final SpeechEmotionService _speechService = SpeechEmotionService();
+  String _currentGlb = 'assets/glb/c_neutral.glb';
+  String _transcribedText = '';
+  String _dominantEmotion = '';
+  List<Map<String, dynamic>> _emotionResults = [];
+  String _status = 'Press to record';
 
   @override
   void initState() {
@@ -130,6 +141,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     // Initialize storage
     _initStorage();
 
+    // Initialize speech service
+    _requestMicPermission();
+
     // Start fun fact timer if not sleeping
     if (energy >= 10) {
       _startFunFactTimer();
@@ -138,6 +152,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     // Check for sleep mode
     if (energy < 10) {
       _enterSleepMode();
+    }
+  }
+
+  Future<void> _requestMicPermission() async {
+    if (await Permission.microphone.request().isGranted) {
+      await _speechService.initialize();
+      setState(() {});
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Microphone permission denied'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.red.shade600,
+        ),
+      );
     }
   }
 
@@ -332,6 +361,42 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  void _updateEmotionResults(String status, String text, List<Map<String, dynamic>> emotions) {
+    setState(() {
+      _status = status;
+      _transcribedText = text;
+      _emotionResults = emotions;
+      _dominantEmotion = emotions.isNotEmpty
+          ? '${emotions[0]['label']} (${(emotions[0]['score'] * 100).toStringAsFixed(2)}%)'
+          : '';
+      _updateGlbModel(emotions.isNotEmpty ? emotions[0]['label'] : 'neutral');
+    });
+  }
+
+  void _updateGlbModel(String emotion) {
+    switch (emotion.toLowerCase()) {
+      case 'angry':
+      case 'anger':
+        _currentGlb = 'assets/glb/c_angry.glb';
+        break;
+      case 'sad':
+      case 'negative':
+        _currentGlb = 'assets/glb/c_cry.glb';
+        break;
+      case 'disgust':
+        _currentGlb = 'assets/glb/c_disgust.glb';
+        break;
+      case 'happy':
+      case 'positive':
+        _currentGlb = 'assets/glb/c_smile.glb';
+        break;
+      case 'neutral':
+      default:
+        _currentGlb = 'assets/glb/c_neutral.glb';
+        break;
+    }
+  }
+
   @override
   void dispose() {
     _heartController.dispose();
@@ -339,6 +404,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _funFactController.dispose();
     _funFactTimer?.cancel();
     _energyRechargeTimer?.cancel();
+    _speechService.stop();
     super.dispose();
   }
 
@@ -631,7 +697,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
             child: Row(
               children: [
-                Icon(Icons.monetization_on, color: Colors.white, size: 16),
+              Icon(Icons.monetization_on, color: Colors.white, size: 16),
                 SizedBox(width: 4),
                 Text(
                   '${coins.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}',
@@ -646,7 +712,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ),
           Row(
             children: [
-              // Daily Reward Button
               GestureDetector(
                 onTap: () => _onButtonTap('Daily Reward', context),
                 child: Container(
@@ -666,7 +731,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 ),
               ),
               SizedBox(width: 8),
-              // Shop Button
               GestureDetector(
                 onTap: isSleeping ? null : _openShop,
                 child: Container(
@@ -686,7 +750,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 ),
               ),
               SizedBox(width: 8),
-              // Storage Button
               GestureDetector(
                 onTap: isSleeping ? null : _openStorage,
                 child: Container(
@@ -793,7 +856,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 height: double.infinity,
                 child: ModelViewer(
                   backgroundColor: Colors.transparent,
-                  src: 'assets/glb/c_neutral.glb',
+                  src: equippedSkin != null && !isSleeping ? 'assets/glb/$equippedSkin.glb' : _currentGlb,
                   alt: 'Water Puppet Character',
                   ar: false,
                   autoRotate: !isSleeping,
@@ -851,7 +914,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 ),
               ),
             ),
-            // Display equipped skin name (for now, as placeholder)
             if (equippedSkin != null)
               Positioned(
                 top: 10,
@@ -870,6 +932,54 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
+                ),
+              ),
+            if (!isSleeping)
+              Positioned(
+                bottom: 50,
+                left: 0,
+                right: 0,
+                child: Column(
+                  children: [
+                    ElevatedButton(
+                      onPressed: _speechService.isListening
+                          ? null
+                          : () {
+                              HapticFeedback.selectionClick();
+                              _speechService.startListening(_updateEmotionResults);
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.purple.shade400,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                      ),
+                      child: Text(
+                        _speechService.isListening ? 'Recording...' : 'Record Speech',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    SizedBox(height: 10),
+                    Text(
+                      'Status: $_status',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    SizedBox(height: 10),
+                    Text(
+                      'Emotion: ${_dominantEmotion.isEmpty ? "None" : _dominantEmotion}',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
               ),
           ],
@@ -1070,7 +1180,7 @@ class ShopPage extends StatelessWidget {
                   onPressed: coins >= item['price']
                       ? () {
                           HapticFeedback.selectionClick();
-                          onPurchase(coins - item['price'], item);
+                          onPurchase(coins - (item['price'] as num).toInt(), item);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text('Purchased ${item['name']}!'),
@@ -1349,6 +1459,34 @@ class GameSelectionPage extends StatelessWidget {
                     ),
                     _buildGameButton(
                       context,
+                      title: 'Story Weaver',
+                      icon: Icons.book,
+                      color: Colors.green.shade400,
+                      onTap: () {
+                        if (energy >= 10) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => StoryWeaverGame(
+                                energy: energy,
+                                coins: coins,
+                                onGameComplete: onGameComplete,
+                              ),
+                            ),
+                          );
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Not enough energy! Need 10%.'),
+                              duration: Duration(seconds: 2),
+                              backgroundColor: Colors.red.shade600,
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                    _buildGameButton(
+                      context,
                       title: 'EmoTi',
                       icon: Icons.face,
                       color: Colors.orange.shade400,
@@ -1357,7 +1495,7 @@ class GameSelectionPage extends StatelessWidget {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => QuizGame(
+                              builder: (context) => EmoTiGame(
                                 energy: energy,
                                 coins: coins,
                                 onGameComplete: onGameComplete,
