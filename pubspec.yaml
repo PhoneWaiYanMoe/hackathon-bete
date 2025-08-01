@@ -65,6 +65,7 @@ flutter:
     - assets/img/
     - assets/glb/
     - assets/model/
+    - assets/model/model_file_30epochs.tflite
 
 
 
