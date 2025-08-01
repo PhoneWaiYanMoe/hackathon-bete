@@ -43,7 +43,7 @@ void _onButtonTap(String action, BuildContext context) {
 }
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
-  int energy = 5; // Set to 5 for testing sleep mode
+  int energy = 100; // Set to 5 for testing sleep mode
   int coins = 1250;
   bool isPremium = false;
   bool isSleeping = false;
