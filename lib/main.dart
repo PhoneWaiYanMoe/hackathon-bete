@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:math';
 import 'games/quiz.dart';
 import 'games/pickTwo.dart';
+import 'games/emoTi.dart';
 
 void main() {
   runApp(WaterPuppetApp());
@@ -47,7 +48,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   bool isPremium = false;
   late AnimationController _heartController;
   late Animation<double> _heartAnimation;
-  
+
   // Fun Facts System
   Timer? _funFactTimer;
   String? _currentFunFact;
@@ -116,7 +117,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void _startFunFactTimer() {
     // Random interval between 15-45 seconds
     int randomSeconds = 15 + Random().nextInt(30);
-    
+
     _funFactTimer = Timer(Duration(seconds: randomSeconds), () {
       _showRandomFunFact();
       _startFunFactTimer(); // Schedule next fun fact
@@ -125,10 +126,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   void _showRandomFunFact() {
     if (!mounted) return;
-    
+
     // Pick a random fun fact
     String randomFact = _funFacts[Random().nextInt(_funFacts.length)];
-    
+
     setState(() {
       _currentFunFact = randomFact;
       _showFunFact = true;
@@ -195,23 +196,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 children: [
                   // Top HUD
                   _buildTopHUD(),
-                  
+
                   // Character Area
                   Expanded(
                     flex: 3,
                     child: _buildCharacterArea(),
                   ),
-                  
+
                   // Main Action Button
                   _buildPlayGamesButton(),
-                  
+
                   // Daily Reward
                   _buildDailyReward(),
-                  
+
                   SizedBox(height: 20),
                 ],
               ),
-              
+
               // Fun Fact Overlay
               if (_showFunFact && _currentFunFact != null)
                 _buildFunFactOverlay(),
@@ -357,7 +358,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ],
             ),
           ),
-          
+
           // Coins
           Container(
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -387,7 +388,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ],
             ),
           ),
-          
+
           // Premium & Settings
           Row(
             children: [
@@ -435,7 +436,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-
   Widget _buildCharacterArea() {
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 20),
@@ -479,7 +479,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 ),
               ),
             ),
-            
+
             // Heart Animation
             Positioned(
               top: 20,
@@ -498,7 +498,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 },
               ),
             ),
-            
+
             // Tap instruction (optional)
             Positioned(
               bottom: 10,
@@ -608,6 +608,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 }
+
 class SpeechBubblePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
@@ -636,7 +637,6 @@ class SpeechBubblePainter extends CustomPainter {
   @override
   bool shouldRepaint(CustomPainter oldDelegate) => false;
 }
-
 
 class GameSelectionPage extends StatelessWidget {
   final int energy;
@@ -746,6 +746,34 @@ class GameSelectionPage extends StatelessWidget {
                             context,
                             MaterialPageRoute(
                               builder: (context) => PickTwoGame(),
+                            ),
+                          );
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Not enough energy! Need 10%.'),
+                              duration: Duration(seconds: 2),
+                              backgroundColor: Colors.red.shade600,
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                    _buildGameButton(
+                      context,
+                      title: 'EmoTi',
+                      icon: Icons.face,
+                      color: Colors.orange.shade400,
+                      onTap: () {
+                        if (energy >= 10) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => EmoTiGame(
+                                energy: energy,
+                                coins: coins,
+                                onGameComplete: onGameComplete,
+                              ),
                             ),
                           );
                         } else {
