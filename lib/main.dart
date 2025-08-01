@@ -196,7 +196,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           }
           
           // Auto-wake up when energy reaches 50%
-          if (energy >= 50) {
+          if (energy >= 90) {
             _wakeUp();
             timer.cancel();
           }
@@ -412,7 +412,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
             SizedBox(height: 20),
             // Wake up button (only if energy is above 20%)
-            if (energy >= 20)
+            if (energy >= 5)
               ElevatedButton(
                 onPressed: _wakeUp,
                 style: ElevatedButton.styleFrom(
@@ -611,7 +611,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
           ),
 
-          // Premium & Settings
+          // Premium, Sleep & Settings
           Row(
             children: [
               GestureDetector(
@@ -630,6 +630,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     ],
                   ),
                   child: Icon(Icons.star, color: Colors.white, size: 20),
+                ),
+              ),
+              SizedBox(width: 8),
+              GestureDetector(
+                onTap: isSleeping ? null : _forceSleep, // Disable when already sleeping
+                child: Container(
+                  padding: EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isSleeping ? Colors.grey.shade700 : Colors.indigo.shade600,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Icon(Icons.bedtime, color: Colors.white, size: 20),
                 ),
               ),
               SizedBox(width: 8),

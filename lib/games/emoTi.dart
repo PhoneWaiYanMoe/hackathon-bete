@@ -28,7 +28,7 @@ enum ChuTeuState { natural, correct, wrong, result }
 
 class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
   late CameraController _cameraController;
-  late Interpreter _interpreter;
+  Interpreter? _interpreter; // Nullable to handle async initialization
   late List<CameraDescription> _cameras;
   bool _isCameraInitialized = false;
   late List<List<String>> _emotionChains;
@@ -131,7 +131,7 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
 
   void _startEmotionDetection() {
     _emotionTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (!_isProcessing && _isCameraInitialized && _currentChainIndex < _emotionChains.length) {
+      if (!_isProcessing && _isCameraInitialized && _currentChainIndex < _emotionChains.length && _interpreter != null) {
         _isProcessing = true;
         await _processCameraFrame();
         _isProcessing = false;
@@ -172,7 +172,7 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
   }
 
   Future<void> _processCameraFrame() async {
-    if (!_cameraController.value.isInitialized) return;
+    if (!_cameraController.value.isInitialized || _interpreter == null) return;
 
     try {
       final image = await _cameraController.takePicture();
@@ -206,22 +206,26 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
       // Resize to 48x48
       final resized = img.copyResize(grayImage, width: 48, height: 48);
 
-      // Normalize pixel values
-      final normalized = Float32List(48 * 48);
+      // Normalize pixel values and prepare input for TFLite
+      final input = Float32List(1 * 48 * 48 * 1); // Shape [1, 48, 48, 1]
       for (int y = 0; y < 48; y++) {
         for (int x = 0; x < 48; x++) {
           final pixel = resized.getPixel(x, y);
-          // Since image is grayscale, red channel equals luminance
-          // final grayValue = img.getRed(pixel) / 255.0;
-          // normalized[y * 48 + x] = grayValue;
+          // Extract grayscale value (since it's grayscale, R=G=B)
+          final grayValue = (pixel.r / 255.0); // Normalize to [0, 1]
+          input[y * 48 + x] = grayValue; // Fill input as [1, 48, 48, 1]
         }
       }
-      final input = normalized.reshape([1, 48, 48, 1]);
+
+      // Prepare output buffer
+      final output = Float32List(1 * 7); // Shape [1, 7]
+      final outputBuffer = [output];
 
       // Run inference
-      final output = Float32List(7).reshape([1, 7]);
-      _interpreter.run(input, output);
-      final label = output[0].indexOf(output[0].reduce(max));
+      _interpreter!.run(input, outputBuffer);
+
+      // Find the index of the highest probability
+      final label = output.asMap().entries.reduce((a, b) => a.value > b.value ? a : b).key;
       setState(() {
         _detectedEmotion = _emotions[label];
       });
@@ -323,7 +327,7 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
   @override
   void dispose() {
     _cameraController.dispose();
-    _interpreter.close();
+    _interpreter?.close();
     _emotionTimer?.cancel();
     _chuTeuController.dispose();
     super.dispose();
