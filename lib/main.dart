@@ -66,6 +66,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late AnimationController _funFactController;
   late Animation<double> _funFactAnimation;
   late Animation<Offset> _funFactSlideAnimation;
+
   final List<String> _funFacts = [
     "🎭 Water puppetry originated over 1000 years ago in the Red River Delta!",
     "💧 Traditional shows feature live folk music with drums, gongs, and wooden bells.",
@@ -366,9 +367,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _status = status;
       _transcribedText = text;
       _emotionResults = emotions;
-      _dominantEmotion = emotions.isNotEmpty
-          ? '${emotions[0]['label']} (${(emotions[0]['score'] * 100).toStringAsFixed(2)}%)'
-          : '';
+      _dominantEmotion = emotions.isNotEmpty ? '${emotions[0]['label']} (${(emotions[0]['score'] * 100).toStringAsFixed(2)}%)' : '';
       _updateGlbModel(emotions.isNotEmpty ? emotions[0]['label'] : 'neutral');
     });
   }
@@ -697,7 +696,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
             child: Row(
               children: [
-              Icon(Icons.monetization_on, color: Colors.white, size: 16),
+                Icon(Icons.monetization_on, color: Colors.white, size: 16),
                 SizedBox(width: 4),
                 Text(
                   '${coins.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}',
@@ -856,7 +855,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 height: double.infinity,
                 child: ModelViewer(
                   backgroundColor: Colors.transparent,
-                  src: equippedSkin != null && !isSleeping ? 'assets/glb/$equippedSkin.glb' : _currentGlb,
+                  src: equippedSkin != null && !isSleeping
+                      ? 'assets/glb/$equippedSkin.glb'
+                      : _currentGlb,
                   alt: 'Water Puppet Character',
                   ar: false,
                   autoRotate: !isSleeping,
@@ -1327,7 +1328,8 @@ class StoragePage extends StatelessWidget {
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                               ),
-                              child: Text(item['name'] == equippedSkin ? 'Equipped' : 'Equip'),
+                              child: Text(
+                                  item['name'] == equippedSkin ? 'Equipped' : 'Equip'),
                             ),
                     ),
                   );
