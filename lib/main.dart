@@ -129,8 +129,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               // Daily Reward
               _buildDailyReward(),
               
-              // Action Buttons Grid
-              _buildActionButtons(),
+           
               
               SizedBox(height: 20),
             ],
@@ -461,7 +460,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Widget _buildActionButtons() {
     final buttons = [
-      {'icon': Icons.restaurant, 'label': 'Feed', 'color': Colors.orange.shade400},
       {'icon': Icons.pets, 'label': 'Pet', 'color': Colors.pink.shade300},
       {'icon': Icons.music_note, 'label': 'Dance', 'color': Colors.green.shade400},
       {'icon': Icons.camera_alt, 'label': 'Photo', 'color': Colors.blue.shade400},
