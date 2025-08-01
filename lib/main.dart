@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'games/quiz.dart';
+import 'games/pickTwo.dart';
 
 void main() {
   runApp(WaterPuppetApp());
@@ -9,7 +11,7 @@ class WaterPuppetApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Water Puppet',
+      title: 'Hồ Gươm Quest',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         fontFamily: 'Roboto',
@@ -25,6 +27,17 @@ class HomePage extends StatefulWidget {
   _HomePageState createState() => _HomePageState();
 }
 
+void _onButtonTap(String action, BuildContext context) {
+  HapticFeedback.selectionClick();
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text('$action feature coming soon!'),
+      duration: Duration(seconds: 1),
+      backgroundColor: Colors.green.shade600,
+    ),
+  );
+}
+
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   int energy = 85;
   int coins = 1250;
@@ -37,17 +50,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    
+
     _bounceController = AnimationController(
       duration: Duration(seconds: 2),
       vsync: this,
     )..repeat(reverse: true);
-    
+
     _heartController = AnimationController(
       duration: Duration(milliseconds: 1500),
       vsync: this,
     );
-    
+
     _bounceAnimation = Tween<double>(
       begin: 0.0,
       end: 10.0,
@@ -55,7 +68,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       parent: _bounceController,
       curve: Curves.easeInOut,
     ));
-    
+
     _heartAnimation = Tween<double>(
       begin: 0.0,
       end: 1.0,
@@ -77,23 +90,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _heartController.forward().then((_) {
       _heartController.reverse();
     });
-    
+
     setState(() {
       if (energy > 5) {
         energy -= 5;
       }
     });
-  }
-
-  void _onButtonTap(String action) {
-    HapticFeedback.selectionClick();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$action feature coming soon!'),
-        duration: Duration(seconds: 1),
-        backgroundColor: Colors.green.shade600,
-      ),
-    );
   }
 
   @override
@@ -128,8 +130,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               
               // Daily Reward
               _buildDailyReward(),
-              
-           
               
               SizedBox(height: 20),
             ],
@@ -209,7 +209,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           Row(
             children: [
               GestureDetector(
-                onTap: () => _onButtonTap('Premium'),
+                onTap: () => _onButtonTap('Premium', context),
                 child: Container(
                   padding: EdgeInsets.all(8),
                   decoration: BoxDecoration(
@@ -228,7 +228,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
               SizedBox(width: 8),
               GestureDetector(
-                onTap: () => _onButtonTap('Settings'),
+                onTap: () => _onButtonTap('Settings', context),
                 child: Container(
                   padding: EdgeInsets.all(8),
                   decoration: BoxDecoration(
@@ -398,7 +398,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       child: ElevatedButton(
-        onPressed: () => _onButtonTap('Play Games'),
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => GameSelectionPage(
+                energy: energy,
+                coins: coins,
+                onGameComplete: (newEnergy, newCoins) {
+                  setState(() {
+                    energy = newEnergy;
+                    coins = newCoins;
+                  });
+                },
+              ),
+            ),
+          );
+        },
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.red.shade500,
           foregroundColor: Colors.white,
@@ -430,7 +446,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
       child: ElevatedButton(
-        onPressed: () => _onButtonTap('Daily Reward'),
+        onPressed: () => _onButtonTap('Daily Reward', context),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.amber.shade400,
           foregroundColor: Colors.white,
@@ -457,66 +473,168 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
     );
   }
+}
 
-  Widget _buildActionButtons() {
-    final buttons = [
-      {'icon': Icons.pets, 'label': 'Pet', 'color': Colors.pink.shade300},
-      {'icon': Icons.music_note, 'label': 'Dance', 'color': Colors.green.shade400},
-      {'icon': Icons.camera_alt, 'label': 'Photo', 'color': Colors.blue.shade400},
-      {'icon': Icons.shopping_bag, 'label': 'Shop', 'color': Colors.amber.shade400},
-      {'icon': Icons.emoji_events, 'label': 'Awards', 'color': Colors.red.shade400},
-    ];
+class GameSelectionPage extends StatelessWidget {
+  final int energy;
+  final int coins;
+  final Function(int, int) onGameComplete;
 
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 20),
-      child: GridView.builder(
-        shrinkWrap: true,
-        physics: NeverScrollableScrollPhysics(),
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 3,
-          childAspectRatio: 2.2,
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 10,
+  GameSelectionPage({
+    required this.energy,
+    required this.coins,
+    required this.onGameComplete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF7FB069),
+              Color(0xFF2F5233),
+            ],
+          ),
         ),
-        itemCount: buttons.length,
-        itemBuilder: (context, index) {
-          final button = buttons[index];
-          return GestureDetector(
-            onTap: () => _onButtonTap(button['label'] as String),
-            child: Container(
-              decoration: BoxDecoration(
-                color: button['color'] as Color,
-                borderRadius: BorderRadius.circular(15),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black26,
-                    blurRadius: 4,
-                    offset: Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    button['icon'] as IconData,
-                    color: Colors.white,
-                    size: 24,
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    button['label'] as String,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Top Bar with Back Button
+              Padding(
+                padding: EdgeInsets.all(16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: Container(
+                        padding: EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade600,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 4,
+                              offset: Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Icon(Icons.arrow_back, color: Colors.white, size: 20),
+                      ),
                     ),
-                  ),
-                ],
+                    Text(
+                      'Select a Game',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(width: 40), // Balance layout
+                  ],
+                ),
+              ),
+              // Game List
+Expanded(
+  child: ListView(
+    padding: EdgeInsets.symmetric(horizontal: 20),
+    children: [
+      _buildGameButton(
+        context,
+        title: 'Quiz',
+        icon: Icons.quiz,
+        color: Colors.blue.shade400,
+        onTap: () {
+          if (energy >= 10) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => QuizGame(
+                  energy: energy,
+                  coins: coins,
+                  onGameComplete: onGameComplete,
+                ),
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Not enough energy! Need 10%.'),
+                duration: Duration(seconds: 2),
+                backgroundColor: Colors.red.shade600,
+              ),
+            );
+          }
+        },
+      ),
+      _buildGameButton(
+        context,
+        title: 'Pick Two',
+        icon: Icons.grid_view,
+        color: Colors.purple.shade400,
+        onTap: () {
+          if (energy >= 10) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => PickTwoGame(),
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Not enough energy! Need 10%.'),
+                duration: Duration(seconds: 2),
+                backgroundColor: Colors.red.shade600,
+              ),
+            );
+          }
+        },
+      ),
+    ],
+  ),
+),
+
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGameButton(BuildContext context, {required String title, required IconData icon, required Color color, required VoidCallback onTap}) {
+    return Container(
+      margin: EdgeInsets.symmetric(vertical: 10),
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: Colors.white,
+          padding: EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(25),
+          ),
+          elevation: 8,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 24),
+            SizedBox(width: 10),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
             ),
-          );
-        },
+          ],
+        ),
       ),
     );
   }
