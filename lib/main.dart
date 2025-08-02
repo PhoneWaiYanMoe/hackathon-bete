@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'dart:async';
-import 'dart:math';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:math';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'speech_emotion_service.dart';
 import 'games/quiz.dart';
 import 'games/pickTwo.dart';
@@ -57,15 +58,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late Animation<double> _heartAnimation;
   late AnimationController _sleepController;
   late Animation<double> _sleepAnimation;
+  late AnimationController _shakeController;
+  late Animation<double> _shakeAnimation;
   Timer? _energyRechargeTimer;
+  bool _reloadModel = false;
 
-  // Fun Facts System
   Timer? _funFactTimer;
   String? _currentFunFact;
   bool _showFunFact = false;
   late AnimationController _funFactController;
   late Animation<double> _funFactAnimation;
   late Animation<Offset> _funFactSlideAnimation;
+
+  String? _currentCulturalResponse;
+  bool _isSpeakingCulturalResponse = false;
+  final FlutterTts _flutterTts = FlutterTts();
 
   final List<String> _funFacts = [
     "🎭 Water puppetry originated over 1000 years ago in the Red River Delta!",
@@ -80,12 +87,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     "🌟 UNESCO recognized water puppetry as Intangible Cultural Heritage.",
   ];
 
-  // Storage System
   List<Map<String, dynamic>> inventory = [];
   String? equippedSkin;
   File? _storageFile;
 
-  // Speech and Emotion System
   final SpeechEmotionService _speechService = SpeechEmotionService();
   String _currentGlb = 'assets/glb/c_neutral.glb';
   String _transcribedText = '';
@@ -96,6 +101,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    _setupTts();
     _heartController = AnimationController(
       duration: Duration(milliseconds: 1500),
       vsync: this,
@@ -120,6 +126,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       curve: Curves.easeInOut,
     ));
 
+    _shakeController = AnimationController(
+      duration: Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _shakeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _shakeController,
+      curve: Curves.linear,
+    ));
+
     _funFactController = AnimationController(
       duration: Duration(milliseconds: 800),
       vsync: this,
@@ -139,21 +157,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       curve: Curves.easeOutBack,
     ));
 
-    // Initialize storage
     _initStorage();
-
-    // Initialize speech service
     _requestMicPermission();
-
-    // Start fun fact timer if not sleeping
     if (energy >= 10) {
       _startFunFactTimer();
     }
-
-    // Check for sleep mode
     if (energy < 10) {
       _enterSleepMode();
     }
+  }
+
+  Future<void> _setupTts() async {
+    await _flutterTts.setLanguage('en-US');
+    await _flutterTts.setPitch(1.0);
+    await _flutterTts.setSpeechRate(0.5);
+    _flutterTts.setCompletionHandler(() {
+      setState(() {
+        _isSpeakingCulturalResponse = false;
+      });
+      _shakeController.reset();
+    });
   }
 
   Future<void> _requestMicPermission() async {
@@ -222,6 +245,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             });
           }
         });
+      }
+    });
+  }
+
+  void _playCulturalResponse(String response) {
+    if (!mounted || isSleeping || _isSpeakingCulturalResponse) return;
+    setState(() {
+      _currentCulturalResponse = response;
+      _isSpeakingCulturalResponse = true;
+    });
+    _flutterTts.speak(response);
+    _shakeController.repeat(reverse: true);
+    Timer(Duration(seconds: 5), () {
+      if (mounted) {
+        setState(() {
+          _currentCulturalResponse = null;
+          _isSpeakingCulturalResponse = false;
+        });
+        _shakeController.reset();
       }
     });
   }
@@ -303,7 +345,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         }
       }
     });
-    if (Random().nextInt(4) == 0 && !_showFunFact && !isSleeping) {
+    if (Random().nextInt(4) == 0 && !_showFunFact && !_isSpeakingCulturalResponse && !isSleeping) {
       _showRandomFunFact();
     }
   }
@@ -354,6 +396,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           onEquipSkin: (String skinName) {
             setState(() {
               equippedSkin = skinName;
+              _reloadModel = !_reloadModel;
               _saveStorage();
             });
           },
@@ -362,37 +405,62 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  void _updateEmotionResults(String status, String text, List<Map<String, dynamic>> emotions) {
+  void _updateEmotionResults(String status, String text, List<Map<String, dynamic>> emotions, String? culturalResponse) {
     setState(() {
       _status = status;
       _transcribedText = text;
       _emotionResults = emotions;
       _dominantEmotion = emotions.isNotEmpty ? '${emotions[0]['label']} (${(emotions[0]['score'] * 100).toStringAsFixed(2)}%)' : '';
-      _updateGlbModel(emotions.isNotEmpty ? emotions[0]['label'] : 'neutral');
+      if (emotions.isNotEmpty) {
+        _updateGlbModel(emotions[0]['label']);
+      }
+      if (culturalResponse != null && culturalResponse.isNotEmpty) {
+        _playCulturalResponse(culturalResponse);
+      }
     });
   }
 
   void _updateGlbModel(String emotion) {
+    print('Updating GLB model for emotion: $emotion');
+    String newGlb;
     switch (emotion.toLowerCase()) {
       case 'angry':
       case 'anger':
-        _currentGlb = 'assets/glb/c_angry.glb';
+        newGlb = 'assets/glb/c_angry.glb';
         break;
       case 'sad':
       case 'negative':
-        _currentGlb = 'assets/glb/c_cry.glb';
+        newGlb = 'assets/glb/c_cry.glb';
         break;
       case 'disgust':
-        _currentGlb = 'assets/glb/c_disgust.glb';
+        newGlb = 'assets/glb/c_disgust.glb';
         break;
       case 'happy':
       case 'positive':
-        _currentGlb = 'assets/glb/c_smile.glb';
+        newGlb = 'assets/glb/c_smile.glb';
         break;
+      case 'fear':
+      case 'surprise':
       case 'neutral':
       default:
-        _currentGlb = 'assets/glb/c_neutral.glb';
+        newGlb = 'assets/glb/c_neutral.glb';
         break;
+    }
+    if (newGlb != _currentGlb) {
+      print('Changing GLB from $_currentGlb to $newGlb');
+      setState(() {
+        _currentGlb = newGlb;
+        _reloadModel = true;
+      });
+      Future.delayed(Duration(milliseconds: 50), () {
+        if (mounted) {
+          setState(() {
+            _reloadModel = false;
+          });
+        }
+      });
+    } else {
+      print('No GLB change needed: $newGlb');
     }
   }
 
@@ -400,9 +468,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void dispose() {
     _heartController.dispose();
     _sleepController.dispose();
+    _shakeController.dispose();
     _funFactController.dispose();
     _funFactTimer?.cancel();
     _energyRechargeTimer?.cancel();
+    _flutterTts.stop();
     _speechService.stop();
     super.dispose();
   }
@@ -547,93 +617,96 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       right: 30,
       child: ScaleTransition(
         scale: _funFactAnimation,
-        child: Stack(
-          children: [
-            Container(
-              margin: EdgeInsets.only(bottom: 20),
-              child: CustomPaint(
-                painter: SpeechBubblePainter(),
-                child: Container(
-                  padding: EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black26,
-                        blurRadius: 8,
-                        offset: Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.shade100,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.lightbulb,
-                                  color: Colors.orange.shade600,
-                                  size: 16,
-                                ),
-                                SizedBox(width: 4),
-                                Text(
-                                  'Did you know?',
-                                  style: TextStyle(
-                                    color: Colors.orange.shade700,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
+        child: SlideTransition(
+          position: _funFactSlideAnimation,
+          child: Stack(
+            children: [
+              Container(
+                margin: EdgeInsets.only(bottom: 20),
+                child: CustomPaint(
+                  painter: SpeechBubblePainter(),
+                  child: Container(
+                    padding: EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 8,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.shade100,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.lightbulb,
+                                    color: Colors.orange.shade600,
+                                    size: 16,
                                   ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Spacer(),
-                          GestureDetector(
-                            onTap: () {
-                              _funFactController.reverse().then((_) {
-                                setState(() {
-                                  _showFunFact = false;
-                                  _currentFunFact = null;
-                                });
-                              });
-                            },
-                            child: Container(
-                              padding: EdgeInsets.all(4),
-                              child: Icon(
-                                Icons.close,
-                                color: Colors.grey.shade400,
-                                size: 18,
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Did you know?',
+                                    style: TextStyle(
+                                      color: Colors.orange.shade700,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 12),
-                      Text(
-                        _currentFunFact!,
-                        style: TextStyle(
-                          color: Colors.grey.shade800,
-                          fontSize: 15,
-                          height: 1.4,
-                          fontWeight: FontWeight.w500,
+                            Spacer(),
+                            GestureDetector(
+                              onTap: () {
+                                _funFactController.reverse().then((_) {
+                                  setState(() {
+                                    _showFunFact = false;
+                                    _currentFunFact = null;
+                                  });
+                                });
+                              },
+                              child: Container(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(
+                                  Icons.close,
+                                  color: Colors.grey.shade400,
+                                  size: 18,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
+                        SizedBox(height: 12),
+                        Text(
+                          _currentFunFact!,
+                          style: TextStyle(
+                            color: Colors.grey.shade800,
+                            fontSize: 15,
+                            height: 1.4,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -832,6 +905,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Widget _buildCharacterArea() {
+    print('Building CharacterArea with GLB: $_currentGlb, equippedSkin: $equippedSkin, isSleeping: $isSleeping, reloadModel: $_reloadModel');
     return Container(
       margin: EdgeInsets.symmetric(horizontal: 20),
       decoration: BoxDecoration(
@@ -853,25 +927,43 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               child: Container(
                 width: double.infinity,
                 height: double.infinity,
-                child: ModelViewer(
-                  backgroundColor: Colors.transparent,
-                  src: equippedSkin != null && !isSleeping
-                      ? 'assets/glb/$equippedSkin.glb'
-                      : _currentGlb,
-                  alt: 'Water Puppet Character',
-                  ar: false,
-                  autoRotate: !isSleeping,
-                  autoRotateDelay: 3000,
-                  rotationPerSecond: '30deg',
-                  cameraControls: true,
-                  disableZoom: true,
-                  touchAction: TouchAction.none,
-                  interactionPrompt: InteractionPrompt.none,
-                  cameraOrbit: '0deg 75deg 4.5m',
-                  minCameraOrbit: 'auto 50deg auto',
-                  maxCameraOrbit: 'auto 100deg auto',
-                  fieldOfView: '30deg',
-                  loading: Loading.eager,
+                child: AnimatedBuilder(
+                  animation: _shakeAnimation,
+                  builder: (context, child) {
+                    return Transform.translate(
+                      offset: Offset(
+                        _isSpeakingCulturalResponse ? sin(_shakeAnimation.value * 2 * pi) * 5 : 0,
+                        0,
+                      ),
+                      child: Visibility(
+                        visible: !_reloadModel,
+                        replacement: Container(),
+                        child: ModelViewer(
+                          key: ValueKey('$_currentGlb$_reloadModel'),
+                          backgroundColor: Colors.transparent,
+                          src: isSleeping
+                              ? _currentGlb
+                              : (equippedSkin != null
+                                  ? 'assets/glb/$equippedSkin.glb'
+                                  : _currentGlb),
+                          alt: 'Water Puppet Character',
+                          ar: false,
+                          autoRotate: !isSleeping && !_isSpeakingCulturalResponse,
+                          autoRotateDelay: 3000,
+                          rotationPerSecond: '30deg',
+                          cameraControls: true,
+                          disableZoom: true,
+                          touchAction: TouchAction.none,
+                          interactionPrompt: InteractionPrompt.none,
+                          cameraOrbit: '0deg 75deg 4.5m',
+                          minCameraOrbit: 'auto 50deg auto',
+                          maxCameraOrbit: 'auto 100deg auto',
+                          fieldOfView: '30deg',
+                          loading: Loading.eager,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
             ),
@@ -943,7 +1035,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 child: Column(
                   children: [
                     ElevatedButton(
-                      onPressed: _speechService.isListening
+                      onPressed: _speechService.isListening || _isSpeakingCulturalResponse
                           ? null
                           : () {
                               HapticFeedback.selectionClick();
@@ -1016,6 +1108,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       }
                     });
                   },
+                  onSleep: _forceSleep,
                 ),
               ),
             );
@@ -1174,7 +1267,7 @@ class ShopPage extends StatelessWidget {
                 subtitle: Text(
                   item['type'] == 'water'
                       ? 'Restores ${item['energy']}% energy'
-                      : 'Decorative skin (no visual change)',
+                      : 'Decorative skin',
                   style: TextStyle(color: Colors.grey.shade600),
                 ),
                 trailing: ElevatedButton(
@@ -1185,21 +1278,22 @@ class ShopPage extends StatelessWidget {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text('Purchased ${item['name']}!'),
-                              duration: Duration(seconds: 1),
+                              duration: Duration(seconds: 2),
                               backgroundColor: Colors.green.shade600,
                             ),
                           );
-                          Navigator.pop(context);
                         }
                       : null,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber.shade400,
+                    backgroundColor: coins >= item['price']
+                        ? Colors.green.shade400
+                        : Colors.grey.shade400,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  child: Text('${item['price']} Coins'),
+                  child: Text('${item['price']} coins'),
                 ),
               ),
             );
@@ -1245,7 +1339,7 @@ class StoragePage extends StatelessWidget {
         child: inventory.isEmpty
             ? Center(
                 child: Text(
-                  'Storage is empty!',
+                  'Your storage is empty!',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 18,
@@ -1280,57 +1374,37 @@ class StoragePage extends StatelessWidget {
                       subtitle: Text(
                         item['type'] == 'water'
                             ? 'Restores ${item['energy']}% energy'
-                            : item['name'] == equippedSkin
-                                ? 'Equipped'
-                                : 'Decorative skin',
+                            : 'Decorative skin',
                         style: TextStyle(color: Colors.grey.shade600),
                       ),
-                      trailing: item['type'] == 'water'
-                          ? ElevatedButton(
-                              onPressed: () {
-                                HapticFeedback.selectionClick();
-                                onUseWater(item['name']);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Used ${item['name']}!'),
-                                    duration: Duration(seconds: 1),
-                                    backgroundColor: Colors.green.shade600,
-                                  ),
-                                );
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.blue.shade400,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                              child: Text('Use'),
-                            )
-                          : ElevatedButton(
-                              onPressed: item['name'] == equippedSkin
-                                  ? null
-                                  : () {
-                                      HapticFeedback.selectionClick();
-                                      onEquipSkin(item['name']);
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text('Equipped ${item['name']}!'),
-                                          duration: Duration(seconds: 1),
-                                          backgroundColor: Colors.green.shade600,
-                                        ),
-                                      );
-                                    },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.amber.shade400,
-                                foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                              child: Text(
-                                  item['name'] == equippedSkin ? 'Equipped' : 'Equip'),
+                      trailing: ElevatedButton(
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          if (item['type'] == 'water') {
+                            onUseWater(item['name']);
+                          } else {
+                            onEquipSkin(item['name']);
+                          }
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                  item['type'] == 'water'
+                                      ? 'Used ${item['name']}!'
+                                      : 'Equipped ${item['name']}!'),
+                              duration: Duration(seconds: 2),
+                              backgroundColor: Colors.green.shade600,
                             ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue.shade400,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: Text(item['type'] == 'water' ? 'Use' : 'Equip'),
+                      ),
                     ),
                   );
                 },
@@ -1344,11 +1418,13 @@ class GameSelectionPage extends StatelessWidget {
   final int energy;
   final int coins;
   final Function(int, int) onGameComplete;
+  final VoidCallback onSleep;
 
   GameSelectionPage({
     required this.energy,
     required this.coins,
     required this.onGameComplete,
+    required this.onSleep,
   });
 
   @override
@@ -1501,6 +1577,7 @@ class GameSelectionPage extends StatelessWidget {
                                 energy: energy,
                                 coins: coins,
                                 onGameComplete: onGameComplete,
+                                onSleep: onSleep,
                               ),
                             ),
                           );

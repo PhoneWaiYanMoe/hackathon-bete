@@ -1,366 +1,208 @@
-
-import 'dart:typed_data';
-
+import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 import 'dart:convert';
 import 'dart:io';
-import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart' show AudioEncoder, AudioRecorder, RecordConfig;
-import 'package:permission_handler/permission_handler.dart';
+import 'dart:math';
 
 class SpeechEmotionService {
-  final AudioRecorder _recorder = AudioRecorder(); // Use AudioRecorder for record >= 5.0.0
+  final String _baseUrl = 'http://172.28.240.138:5000';
+  final AudioRecorder _recorder = AudioRecorder();
+  File? _audioFile;
+  bool _isRecording = false;
   bool _isInitialized = false;
-  String _status = 'Press to record';
-  String _transcribedText = '';
-  String _dominantEmotion = '';
-  List<Map<String, dynamic>> _emotionResults = [];
-  
-  // Backend URL - Update this to your Flask server URL
-  static const String _backendUrl = 'http://172.28.240.138'; // Change to your server IP
-  // For Android emulator: 'http://10.0.2.2:5000'
-  // For iOS simulator: 'http://localhost:5000'
-  // For real device: 'http://YOUR_COMPUTER_IP:5000'
+  final String _apiKey = 'AIzaSyABCmiB8TTFtfI80yLqxLHnqMWGKBpuXJU'; // Replace with your actual Gemini API key
 
-  bool _isListening = false;
-
-  bool get isListening => _isListening;
-  String get status => _status;
-  String get transcribedText => _transcribedText;
-  String get dominantEmotion => _dominantEmotion;
-  List<Map<String, dynamic>> get emotionResults => _emotionResults;
+  bool get isListening => _isRecording;
 
   Future<void> initialize() async {
     try {
-      // Check if audio recording is supported
-      bool hasPermission = await _recorder.hasPermission();
-      if (hasPermission) {
-        _isInitialized = true;
-        // Test backend connection
-        await _testBackendConnection();
-        _status = 'Press to record';
-      } else {
-        _status = 'Audio recording permission not granted';
-      }
-    } catch (e) {
-      _status = 'Error initializing audio: $e';
-      print('Initialization error: $e');
-    }
-  }
-
-  Future<void> _testBackendConnection() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$_backendUrl/health'),
-        headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 5));
-      
+      final directory = await getApplicationDocumentsDirectory();
+      _audioFile = File('${directory.path}/temp_audio.wav');
+      final response = await http.get(Uri.parse('$_baseUrl/health'));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        print('Backend connection successful');
-        print('Models loaded: ${data['models_loaded']}');
+        if (data['models_loaded']['whisper'] && data['models_loaded']['emotion']) {
+          _isInitialized = true;
+          print('SpeechEmotionService initialized successfully');
+        } else {
+          print('Models not loaded on backend');
+        }
       } else {
-        print('Backend connection failed: ${response.statusCode}');
-        _status = 'Backend server not available';
+        print('Backend health check failed: ${response.statusCode}');
       }
     } catch (e) {
-      print('Backend connection error: $e');
-      _status = 'Cannot connect to backend server';
+      print('Error initializing SpeechEmotionService: $e');
+      _isInitialized = false;
     }
   }
 
-  Future<void> startListening(void Function(String, String, List<Map<String, dynamic>>) onResult) async {
+  Future<void> startListening(void Function(String, String, List<Map<String, dynamic>>, String?) callback) async {
     if (!_isInitialized) {
-      _status = 'Audio not initialized';
-      onResult(_status, _transcribedText, _emotionResults);
+      callback('Error: Service not initialized', '', [], null);
       return;
     }
 
-    if (await Permission.microphone.request().isGranted) {
-      _transcribedText = '';
-      _dominantEmotion = '';
-      _emotionResults = [];
-      _status = 'Listening...';
-      _isListening = true;
-      onResult(_status, _transcribedText, _emotionResults);
+    try {
+      if (await _recorder.hasPermission()) {
+        _isRecording = true;
+        await _recorder.start(const RecordConfig(), path: _audioFile!.path);
+        print('Recording started');
+        callback('Recording...', '', [], null);
 
-      try {
-        // Create a temporary file to store the recording
-        final directory = await getTemporaryDirectory();
-        final audioPath = '${directory.path}/temp_audio.wav';
-
-        // Start recording
-        await _recorder.start(
-          const RecordConfig(
-            encoder: AudioEncoder.wav,
-            sampleRate: 16000,
-          ),
-          path: audioPath,
-        );
-
-        // Record for 5 seconds
         await Future.delayed(Duration(seconds: 5));
-
-        // Stop recording and get the file path
-        final recordedPath = await _recorder.stop();
-        _isListening = false;
-
-        _status = 'Processing emotions...';
-        onResult(_status, _transcribedText, _emotionResults);
-
-        // Send the recorded audio to the backend
-        if (recordedPath != null) {
-          final audioFile = File(recordedPath);
-          if (await audioFile.exists()) {
-            await _analyzeAudioFile(audioFile, onResult);
-            await audioFile.delete(); // Clean up the temporary file
-          } else {
-            _status = 'Error: Audio file not found';
-            onResult(_status, _transcribedText, _emotionResults);
-          }
-        } else {
-          _status = 'Error: No audio recorded';
-          onResult(_status, _transcribedText, _emotionResults);
-        }
-      } catch (e) {
-        _isListening = false;
-        _status = 'Error recording: $e';
-        print('Recording error: $e');
-        onResult(_status, _transcribedText, _emotionResults);
-      }
-    } else {
-      _isListening = false;
-      _status = 'Microphone permission denied';
-      onResult(_status, _transcribedText, _emotionResults);
-    }
-  }
-
-  Future<void> _analyzeAudioFile(File audioFile, void Function(String, String, List<Map<String, dynamic>>) onResult) async {
-    _status = 'Processing audio...';
-    _transcribedText = '';
-    _emotionResults = [];
-    _dominantEmotion = '';
-    onResult(_status, _transcribedText, _emotionResults);
-
-    try {
-      var request = http.MultipartRequest('POST', Uri.parse('$_backendUrl/transcribe_and_analyze'));
-      request.files.add(await http.MultipartFile.fromPath('audio', audioFile.path));
-      
-      var streamedResponse = await request.send().timeout(const Duration(seconds: 60));
-      var response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        
-        if (data['success'] == true) {
-          _transcribedText = data['transcribed_text'] ?? '';
-          
-          if (data['emotions'] != null) {
-            final emotions = List<Map<String, dynamic>>.from(data['emotions']);
-            
-            _emotionResults = emotions.map((emotion) => {
-              'label': emotion['label'],
-              'score': emotion['score'] / 100.0, // Convert to 0-1 range
-              'percentage': emotion['score'], // Keep percentage for display
-            }).toList();
-          }
-          
-          if (data['dominant_emotion'] != null) {
-            final dominant = data['dominant_emotion'];
-            _dominantEmotion = '${dominant['label']} (${dominant['score'].toStringAsFixed(2)}%)';
-          }
-          
-          _status = data['message'] ?? 'Analysis complete';
-        } else {
-          _status = 'Analysis failed: ${data['error']}';
-        }
+        await stop(callback);
       } else {
-        final errorData = jsonDecode(response.body);
-        _status = 'Backend error: ${errorData['error']}';
+        callback('Microphone permission denied', '', [], null);
       }
     } catch (e) {
-      _status = 'Error processing audio: $e';
-      print('Audio analysis error: $e');
+      print('Error starting recording: $e');
+      _isRecording = false;
+      callback('Error starting recording: $e', '', [], null);
     }
-    
-    onResult(_status, _transcribedText, _emotionResults);
   }
 
-  Future<void> transcribeAudioFile(File audioFile, void Function(String, String, List<Map<String, dynamic>>) onResult) async {
-    _status = 'Transcribing audio...';
-    _transcribedText = '';
-    _emotionResults = [];
-    _dominantEmotion = '';
-    onResult(_status, _transcribedText, _emotionResults);
-
-    try {
-      var request = http.MultipartRequest('POST', Uri.parse('$_backendUrl/transcribe'));
-      request.files.add(await http.MultipartFile.fromPath('audio', audioFile.path));
-      
-      var streamedResponse = await request.send().timeout(const Duration(seconds: 60));
-      var response = await http.Response.fromStream(streamedResponse);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        
-        if (data['success'] == true) {
-          _transcribedText = data['transcribed_text'] ?? '';
-          _status = data['message'] ?? 'Transcription complete';
-        } else {
-          _status = 'Transcription failed: ${data['error']}';
-        }
-      } else {
-        final errorData = jsonDecode(response.body);
-        _status = 'Backend error: ${errorData['error']}';
-      }
-    } catch (e) {
-      _status = 'Error transcribing audio: $e';
-      print('Transcription error: $e');
-    }
-    
-    onResult(_status, _transcribedText, _emotionResults);
-  }
-
-  Future<void> transcribeAudioBytes(Uint8List audioBytes, void Function(String, String, List<Map<String, dynamic>>) onResult) async {
-    _status = 'Transcribing audio...';
-    _transcribedText = '';
-    _emotionResults = [];
-    _dominantEmotion = '';
-    onResult(_status, _transcribedText, _emotionResults);
-
-    try {
-      String audioBase64 = base64Encode(audioBytes);
-      
-      final response = await http.post(
-        Uri.parse('$_backendUrl/transcribe_base64'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'audio_data': audioBase64}),
-      ).timeout(const Duration(seconds: 60));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        
-        if (data['success'] == true) {
-          _transcribedText = data['transcribed_text'] ?? '';
-          _status = data['message'] ?? 'Transcription complete';
-        } else {
-          _status = 'Transcription failed: ${data['error']}';
-        }
-      } else {
-        final errorData = jsonDecode(response.body);
-        _status = 'Backend error: ${errorData['error']}';
-      }
-    } catch (e) {
-      _status = 'Error transcribing audio: $e';
-      print('Audio transcription error: $e');
-    }
-    
-    onResult(_status, _transcribedText, _emotionResults);
-  }
-
-  Future<void> analyzeTextDirectly(String text, void Function(String, String, List<Map<String, dynamic>>) onResult) async {
-    if (text.isEmpty) {
-      _status = 'No text provided';
-      onResult(_status, '', []);
+  Future<void> stop([void Function(String, String, List<Map<String, dynamic>>, String?)? callback]) async {
+    if (!_isRecording) {
+      callback?.call('Not recording', '', [], null);
       return;
     }
 
-    _status = 'Analyzing emotions...';
-    _transcribedText = text;
-    _emotionResults = [];
-    _dominantEmotion = '';
-    onResult(_status, _transcribedText, _emotionResults);
+    try {
+      await _recorder.stop();
+      _isRecording = false;
+      print('Recording stopped, processing audio...');
+      callback?.call('Processing...', '', [], null);
+
+      final result = await _transcribeAndAnalyze();
+      if (result['success']) {
+        final transcribedText = result['transcribed_text'] ?? '';
+        final emotions = (result['emotions'] as List<dynamic>?)?.map((e) => {
+              'label': e['label'] as String,
+              'score': (e['score'] / 100).toDouble(),
+              'percentage': e['score'].toDouble(),
+            }).toList() ?? [];
+        final culturalResponse = await _generateCulturalResponse(transcribedText);
+        callback?.call('Success', transcribedText, emotions, culturalResponse);
+      } else {
+        callback?.call('Error: ${result['error']}', '', [], null);
+      }
+    } catch (e) {
+      print('Error stopping recording: $e');
+      _isRecording = false;
+      callback?.call('Error stopping recording: $e', '', [], null);
+    }
+  }
+
+  Future<Map<String, dynamic>> _transcribeAndAnalyze() async {
+    try {
+      final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/transcribe_and_analyze'));
+      request.files.add(await http.MultipartFile.fromPath('audio', _audioFile!.path));
+      final response = await request.send();
+      final responseBody = await response.stream.bytesToString();
+      final data = jsonDecode(responseBody);
+
+      if (response.statusCode == 200 && data['success']) {
+        print('Transcription and analysis successful: ${data['transcribed_text']}');
+        return data;
+      } else {
+        print('Backend error: ${data['error']}');
+        return {'success': false, 'error': data['error'] ?? 'Unknown error'};
+      }
+    } catch (e) {
+      print('Error in transcribe_and_analyze: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  Future<String?> _generateCulturalResponse(String transcribedText) async {
+    if (transcribedText.isEmpty) {
+      return null;
+    }
+
+    const String promptContext = '''
+casually talking with user like a friend and make sure its short abt 1 to 2 sentences''';
+
+    String fullPrompt = '''
+$promptContext
+
+User's input: $transcribedText
+
+Response:
+''';
 
     try {
       final response = await http.post(
-        Uri.parse('$_backendUrl/analyze_emotions'),
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({'text': text}),
-      ).timeout(const Duration(seconds: 30));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        
-        if (data['success'] == true) {
-          final emotions = List<Map<String, dynamic>>.from(data['emotions']);
-          
-          _emotionResults = emotions.map((emotion) => {
-            'label': emotion['label'],
-            'score': emotion['score'] / 100.0, // Convert to 0-1 range
-            'percentage': emotion['score'], // Keep percentage for display
-          }).toList();
-          
-          if (data['dominant_emotion'] != null) {
-            final dominant = data['dominant_emotion'];
-            _dominantEmotion = '${dominant['label']} (${dominant['score'].toStringAsFixed(2)}%)';
+        Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_apiKey'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'parts': [
+                {'text': fullPrompt}
+              ]
+            }
+          ],
+          'generationConfig': {
+            'temperature': 0.7,
+            'topK': 40,
+            'topP': 0.95,
+            'maxOutputTokens': 64,
           }
-          
-          _status = 'Analysis complete';
-        } else {
-          _status = 'Emotion analysis failed: ${data['error']}';
-        }
-      } else {
-        final errorData = jsonDecode(response.body);
-        _status = 'Backend error: ${errorData['error']}';
-      }
-    } catch (e) {
-      _status = 'Error analyzing emotions: $e';
-      print('Emotion analysis error: $e');
-    }
-    
-    onResult(_status, _transcribedText, _emotionResults);
-  }
+        }),
+      );
 
-  void stop() {
-    if (_isListening) {
-      _recorder.stop();
-      _isListening = false;
-    }
-    _status = 'Press to record';
-  }
-
-  Future<bool> testConnection() async {
-    try {
-      final response = await http.get(
-        Uri.parse('$_backendUrl/health'),
-        headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 5));
-      
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        print('Backend status: ${data['status']}');
-        print('Models loaded: ${data['models_loaded']}');
-        return true;
+        String text = data['candidates'][0]['content']['parts'][0]['text'];
+        // Ensure the response is one sentence by truncating at the first period
+        return text.split('.').first + '.';
+      } else {
+        print('Gemini API error: ${response.statusCode}');
+        return _createMockCulturalResponse(transcribedText);
       }
-      return false;
     } catch (e) {
-      print('Connection test failed: $e');
-      return false;
+      print('Error calling Gemini API: $e');
+      return _createMockCulturalResponse(transcribedText);
     }
   }
 
-  Future<Map<String, dynamic>?> getBackendHealth() async {
+  String _createMockCulturalResponse(String input) {
+    List<String> responses = [
+      'By Hoan Kiem Lake, your words stirred the Golden Turtle to share wisdom.',
+      'In the Red River’s mist, your voice inspired a dragon’s harmonious song.',
+      'Amid bamboo groves, spirits blessed your words with ancient courage.',
+    ];
+
+    Random rand = Random();
+    return responses[rand.nextInt(responses.length)];
+  }
+
+  Future<Map<String, dynamic>> transcribeAudioFile(File audioFile) async {
     try {
-      final response = await http.get(
-        Uri.parse('$_backendUrl/health'),
-        headers: {'Content-Type': 'application/json'},
-      ).timeout(const Duration(seconds: 5));
-      
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      }
-      return null;
+      final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/transcribe'));
+      request.files.add(await http.MultipartFile.fromPath('audio', audioFile.path));
+      final response = await request.send();
+      final responseBody = await response.stream.bytesToString();
+      final data = jsonDecode(responseBody);
+      return data;
     } catch (e) {
-      print('Health check failed: $e');
-      return null;
+      return {'success': false, 'error': e.toString()};
     }
   }
 
-  void dispose() {
-    _recorder.dispose();
+  Future<Map<String, dynamic>> analyzeTextDirectly(String text) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/analyze_emotions'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'text': text}),
+      );
+      final data = jsonDecode(response.body);
+      return data;
+    } catch (e) {
+      return {'success': false, 'error': e.toString()};
+    }
   }
 }

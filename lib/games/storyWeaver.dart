@@ -31,7 +31,7 @@ class _StoryWeaverGameState extends State<StoryWeaverGame> {
   bool _isSpeaking = false;
 
   // Placeholder Gemini API key (replace with actual key for real use)
-  final String _apiKey = 'AI+++++++++++';
+  final String _apiKey = 'AIzaSyABCmiB8TTFtfI80yLqxLHnqMWGKBpuXJU';
 
   @override
   void initState() {
