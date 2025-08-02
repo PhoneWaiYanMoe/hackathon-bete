@@ -26,7 +26,7 @@ class _QuizGameState extends State<QuizGame> with TickerProviderStateMixin {
   late int currentEnergy;
   late int currentCoins;
   ChuTeuState chuTeuState = ChuTeuState.natural;
-  Color questionCardColor = Colors.blue.withOpacity(0.3); // 0.0 = fully transparent, 1.0 = fully opaque
+  Color questionCardColor = Colors.blue.withOpacity(0.3);
   late AnimationController _chuTeuController;
   late Animation<double> _chuTeuAnimation;
   String currentStage = '';
@@ -98,10 +98,9 @@ class _QuizGameState extends State<QuizGame> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    currentEnergy = widget.energy - 10; // Deduct 10 energy to play
+    currentEnergy = widget.energy - 10;
     currentCoins = widget.coins;
 
-    // Initialize stage for the first question
     usedStages = [];
     currentStage = (stageImages..shuffle(Random())).first;
     usedStages.add(currentStage);
@@ -130,113 +129,107 @@ class _QuizGameState extends State<QuizGame> with TickerProviderStateMixin {
     if (selectedAnswer == questions[currentQuestionIndex]['correctAnswer']) {
       setState(() {
         correctAnswers++;
-        currentCoins += 50; // Reward 50 coins for correct answer
+        currentCoins += 50;
         chuTeuState = ChuTeuState.correct;
-        // questionCardColor = Colors.green.shade600;
-        _chuTeuController.repeat(reverse: true); // Bounce up-down
+        _chuTeuController.repeat(reverse: true);
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Correct! +50 coins'),
-          duration: const Duration(seconds: 1),
-          backgroundColor: Colors.green.shade600,
+        const SnackBar(
+          content: Text('Correct! +50 coins'),
+          duration: Duration(seconds: 1),
+          backgroundColor: Colors.green,
         ),
       );
     } else {
       setState(() {
         chuTeuState = ChuTeuState.wrong;
-        // questionCardColor = Colors.red.shade600;
-        _chuTeuController.repeat(reverse: true); // Shake side-to-side
+        _chuTeuController.repeat(reverse: true);
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Wrong! Try again next time.'),
-          duration: const Duration(seconds: 1),
-          backgroundColor: Colors.red.shade600,
+        const SnackBar(
+          content: Text('Wrong! Try again next time.'),
+          duration: Duration(seconds: 1),
+          backgroundColor: Colors.red,
         ),
       );
     }
 
-    // Revert Chú Tễu and question card after 1 second
     Future.delayed(const Duration(seconds: 1), () {
-      setState(() {
-        chuTeuState = ChuTeuState.natural;
-        questionCardColor = Colors.blue.withOpacity(0.3);
-        _chuTeuController.reset();
-      });
-    });
-
-    setState(() {
-      currentQuestionIndex++;
-      // Select new stage for next question if not at the end
-      if (currentQuestionIndex < questions.length) {
-        List<String> availableStages = stageImages.where((stage) => !usedStages.contains(stage)).toList();
-        if (availableStages.isNotEmpty) {
-          currentStage = (availableStages..shuffle(Random())).first;
-          usedStages.add(currentStage);
-        } else {
-          // Reset usedStages if all stages are used (for quizzes with more than 8 questions)
-          usedStages = [currentStage];
-          currentStage = (stageImages..shuffle(Random())).first;
-          usedStages.add(currentStage);
-        }
+      if (mounted) {
+        setState(() {
+          chuTeuState = ChuTeuState.natural;
+          _chuTeuController.reset();
+        });
       }
     });
 
-    if (currentQuestionIndex >= questions.length) {
-      // Quiz complete, show results and return to main screen
-      widget.onGameComplete(currentEnergy, currentCoins);
+    if (mounted) {
       setState(() {
-        chuTeuState = ChuTeuState.result;
-        usedStages = []; // Reset for next quiz session
-      });
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          backgroundColor: Colors.blue.withOpacity(0.3),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Image.asset(
-                'assets/img/ChuTeuResult.png',
-                width: 100,
-                height: 100,
+        currentQuestionIndex++;
+        if (currentQuestionIndex < questions.length) {
+          List<String> availableStages = stageImages.where((stage) => !usedStages.contains(stage)).toList();
+          if (availableStages.isNotEmpty) {
+            currentStage = (availableStages..shuffle(Random())).first;
+            usedStages.add(currentStage);
+          } else {
+            usedStages = [currentStage];
+            currentStage = (stageImages..shuffle(Random())).first;
+            usedStages.add(currentStage);
+          }
+        } else {
+          // Quiz complete
+          widget.onGameComplete(currentEnergy, currentCoins);
+          chuTeuState = ChuTeuState.result;
+          usedStages = [];
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => AlertDialog(
+              backgroundColor: Colors.blue.withOpacity(0.3),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
               ),
-              const SizedBox(height: 10),
-              const Text(
-                'Quiz Complete!',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    'assets/img/ChuTeuResult.png',
+                    width: 100,
+                    height: 100,
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Quiz Complete!',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    'You got $correctAnswers out of ${questions.length} correct!\nEarned ${correctAnswers * 50} coins.',
+                    style: const TextStyle(color: Colors.white),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.pop(context);
+                    Navigator.pop(context);
+                  },
+                  child: const Text(
+                    'Back to Home',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
                 ),
-              ),
-              Text(
-                'You got $correctAnswers out of ${questions.length} correct!\nEarned ${correctAnswers * 50} coins.',
-                style: const TextStyle(color: Colors.white),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context); // Close dialog
-                Navigator.pop(context); // Return to GameSelectionPage
-                Navigator.pop(context); // Return to HomePage
-              },
-              child: const Text(
-                'Back to Home',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              ),
+              ],
             ),
-          ],
-        ),
-      );
+          );
+        }
+      });
     }
   }
 
@@ -259,6 +252,11 @@ class _QuizGameState extends State<QuizGame> with TickerProviderStateMixin {
         break;
     }
 
+    // Prevent rendering if index is out of bounds
+    if (currentQuestionIndex >= questions.length) {
+      return Container(); // Return empty container or result screen
+    }
+
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(
@@ -272,7 +270,6 @@ class _QuizGameState extends State<QuizGame> with TickerProviderStateMixin {
             children: [
               Column(
                 children: [
-                  // Top Bar with Back Button and Progress
                   Padding(
                     padding: const EdgeInsets.all(16),
                     child: Row(
@@ -307,11 +304,10 @@ class _QuizGameState extends State<QuizGame> with TickerProviderStateMixin {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(width: 40), // Balance layout
+                        const SizedBox(width: 40),
                       ],
                     ),
                   ),
-                  // Question Area
                   Expanded(
                     child: AnimatedContainer(
                       duration: const Duration(milliseconds: 300),
@@ -371,7 +367,6 @@ class _QuizGameState extends State<QuizGame> with TickerProviderStateMixin {
                   ),
                 ],
               ),
-              // Chú Tễu Image with Animation
               Positioned(
                 bottom: 20,
                 right: 20,
@@ -381,7 +376,7 @@ class _QuizGameState extends State<QuizGame> with TickerProviderStateMixin {
                     return Transform.translate(
                       offset: Offset(
                         chuTeuState == ChuTeuState.wrong ? _chuTeuAnimation.value : 0.0,
-                        chuTeuState == ChuTeuState.correct ? _chuTeuAnimation.value : 0.0,
+                        chuTeuState == ChuTeuState.correct ? -_chuTeuAnimation.value : 0.0,
                       ),
                       child: Image.asset(
                         chuTeuImage,
