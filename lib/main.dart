@@ -52,6 +52,8 @@ void _onButtonTap(String action, BuildContext context) {
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   int energy = 100;
   int coins = 1250;
+  int exp = 0;
+  int level = 1;
   bool isPremium = false;
   bool isSleeping = false;
   late AnimationController _heartController;
@@ -60,6 +62,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late Animation<double> _sleepAnimation;
   late AnimationController _shakeController;
   late Animation<double> _shakeAnimation;
+  late AnimationController _levelUpController;
+  late Animation<double> _levelUpAnimation;
   Timer? _energyRechargeTimer;
   bool _reloadModel = false;
 
@@ -138,6 +142,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       curve: Curves.linear,
     ));
 
+    _levelUpController = AnimationController(
+      duration: Duration(milliseconds: 1000),
+      vsync: this,
+    );
+    _levelUpAnimation = Tween<double>(
+      begin: 1.0,
+      end: 1.2,
+    ).animate(CurvedAnimation(
+      parent: _levelUpController,
+      curve: Curves.elasticOut,
+    ));
+
     _funFactController = AnimationController(
       duration: Duration(milliseconds: 800),
       vsync: this,
@@ -203,6 +219,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       setState(() {
         inventory = List<Map<String, dynamic>>.from(data['inventory'] ?? []);
         equippedSkin = data['equippedSkin'];
+        exp = data['exp'] ?? 0;
+        level = data['level'] ?? 1;
       });
     } else {
       await _saveStorage();
@@ -214,8 +232,35 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final data = {
       'inventory': inventory,
       'equippedSkin': equippedSkin,
+      'exp': exp,
+      'level': level,
     };
     await _storageFile!.writeAsString(jsonEncode(data));
+  }
+
+  int _getExpForNextLevel(int currentLevel) {
+    if (currentLevel >= 10) return 0; // Max level
+    return 100 * currentLevel * currentLevel;
+  }
+
+  void _addExp(int amount) {
+    if (level >= 10) return; // Max level
+    setState(() {
+      exp += amount;
+      while (exp >= _getExpForNextLevel(level) && level < 10) {
+        exp -= _getExpForNextLevel(level);
+        level++;
+        _levelUpController.forward().then((_) => _levelUpController.reverse());
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Level Up! You reached Level $level! 🌟'),
+            duration: Duration(seconds: 2),
+            backgroundColor: Colors.blue.shade600,
+          ),
+        );
+      }
+      _saveStorage();
+    });
   }
 
   void _startFunFactTimer() {
@@ -338,6 +383,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     setState(() {
       if (energy > 5) {
         energy -= 5;
+        _addExp(10); // Gain 10 EXP per tap
         if (energy < 10) {
           Timer(Duration(milliseconds: 500), () {
             _enterSleepMode();
@@ -410,9 +456,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _status = status;
       _transcribedText = text;
       _emotionResults = emotions;
-      _dominantEmotion = emotions.isNotEmpty ? '${emotions[0]['label']} (${(emotions[0]['score'] * 100).toStringAsFixed(2)}%)' : '';
+      _dominantEmotion = emotions.isNotEmpty ? emotions[0]['label'] : '';
       if (emotions.isNotEmpty) {
         _updateGlbModel(emotions[0]['label']);
+        _addExp(50); // Gain 50 EXP per speech recording
       }
       if (culturalResponse != null && culturalResponse.isNotEmpty) {
         _playCulturalResponse(culturalResponse);
@@ -464,11 +511,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
- @override
+  @override
   void dispose() {
     _heartController.dispose();
     _sleepController.dispose();
     _shakeController.dispose();
+    _levelUpController.dispose();
     _funFactController.dispose();
     _funFactTimer?.cancel();
     _energyRechargeTimer?.cancel();
@@ -513,8 +561,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           child: _buildCharacterArea(),
                         ),
                         _buildMainActionButton(),
-                        if (!isSleeping) _buildDailyReward(),
-                        SizedBox(height: 20),
+                        // if (!isSleeping) _buildDailyReward(),
+                        // SizedBox(height: 20),
                       ],
                     ),
                     if (_showFunFact && _currentFunFact != null && !isSleeping)
@@ -530,7 +578,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
- 
   Widget _buildSleepOverlay() {
     return Positioned(
       top: 0,
@@ -712,373 +759,452 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ),
     );
   }
-
-  Widget _buildTopHUD() {
-    return Padding(
-      padding: EdgeInsets.all(16),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: energy < 10
-                  ? (isSleeping ? Colors.indigo.shade600 : Colors.red.shade400)
-                  : Colors.blue.shade400,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black26,
-                  blurRadius: 4,
-                  offset: Offset(0, 2),
+Widget _buildTopHUD() {
+  final nextLevelExp = _getExpForNextLevel(level);
+  final expProgress = level >= 10 ? 1.0 : exp / nextLevelExp;
+  return Padding(
+    padding: EdgeInsets.all(16),
+    child: Column(
+      children: [
+        // First Row: Water/Energy, Shop, Inventory, Sleep Mode, Settings
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            // Water/Energy Container
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: energy < 10
+                    ? (isSleeping ? Colors.indigo.shade600 : Colors.red.shade400)
+                    : Colors.blue.shade400,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 4,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    energy < 10
+                        ? (isSleeping ? Icons.bedtime : Icons.battery_alert)
+                        : Icons.water_drop,
+                    color: Colors.white,
+                    size: 16,
+                  ),
+                  SizedBox(width: 4),
+                  Text(
+                    '$energy%',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
+            // Action Buttons Row
+            Row(
+              children: [
+                // Shop Button
+                GestureDetector(
+                  onTap: isSleeping ? null : _openShop,
+                  child: Container(
+                    padding: EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isSleeping ? Colors.grey.shade700 : Colors.green.shade400,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 4,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Icon(Icons.store, color: Colors.white, size: 20),
+                  ),
+                ),
+                SizedBox(width: 8),
+                
+                // Inventory Button
+                GestureDetector(
+                  onTap: isSleeping ? null : _openStorage,
+                  child: Container(
+                    padding: EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isSleeping ? Colors.grey.shade700 : Colors.blue.shade600,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 4,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Icon(Icons.inventory, color: Colors.white, size: 20),
+                  ),
+                ),
+                SizedBox(width: 8),
+                
+                // Premium Button
+                GestureDetector(
+                  onTap: () => _onButtonTap('Premium', context),
+                  child: Container(
+                    padding: EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isSleeping ? Colors.grey.shade700 : Colors.orange.shade400,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 4,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Icon(Icons.star, color: Colors.white, size: 20),
+                  ),
+                ),
+                SizedBox(width: 8),
+                
+                // Sleep Button
+                GestureDetector(
+                  onTap: isSleeping ? null : _forceSleep,
+                  child: Container(
+                    padding: EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isSleeping ? Colors.grey.shade700 : Colors.indigo.shade600,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 4,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Icon(Icons.bedtime, color: Colors.white, size: 20),
+                  ),
+                ),
+                SizedBox(width: 8),
+                
+                // Settings Button
+                GestureDetector(
+                  onTap: () => _onButtonTap('Settings', context),
+                  child: Container(
+                    padding: EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade600,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black26,
+                          blurRadius: 4,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Icon(Icons.settings, color: Colors.white, size: 20),
+                  ),
                 ),
               ],
             ),
-            child: Row(
+          ],
+        ),
+        
+        SizedBox(height: 16),
+        
+        // Second Row: Level and Coins
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            // Level Section
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  energy < 10
-                      ? (isSleeping ? Icons.bedtime : Icons.battery_alert)
-                      : Icons.water_drop,
-                  color: Colors.white,
-                  size: 16,
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.purple.shade400,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black26,
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.star, color: Colors.white, size: 16),
+                      SizedBox(width: 4),
+                      Text(
+                        'Level $level',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                SizedBox(width: 4),
+                SizedBox(height: 8),
+                Container(
+                  width: 100,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: FractionallySizedBox(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: expProgress,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.yellow.shade600,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 4),
                 Text(
-                  '$energy%',
+                  level >= 10 ? 'Max Level' : '$exp / $nextLevelExp EXP',
                   style: TextStyle(
                     color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
+                    fontSize: 12,
                   ),
                 ),
               ],
             ),
-          ),
-          Container(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: isSleeping ? Colors.grey.shade600 : Colors.amber.shade400,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black26,
-                  blurRadius: 4,
-                  offset: Offset(0, 2),
-                ),
-              ],
+            
+            // Coins Container
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: isSleeping ? Colors.grey.shade600 : Colors.amber.shade400,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 4,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.monetization_on, color: Colors.white, size: 16),
+                  SizedBox(width: 4),
+                  Text(
+                    '${coins.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
             ),
-            child: Row(
-              children: [
-                Icon(Icons.monetization_on, color: Colors.white, size: 16),
-                SizedBox(width: 4),
-                Text(
-                  '${coins.toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Row(
-            children: [
-              GestureDetector(
-                onTap: () => _onButtonTap('Daily Reward', context),
-                child: Container(
-                  padding: EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isSleeping ? Colors.grey.shade700 : Colors.amber.shade400,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black26,
-                        blurRadius: 4,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Icon(Icons.card_giftcard, color: Colors.white, size: 20),
-                ),
-              ),
-              SizedBox(width: 8),
-              GestureDetector(
-                onTap: isSleeping ? null : _openShop,
-                child: Container(
-                  padding: EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isSleeping ? Colors.grey.shade700 : Colors.green.shade400,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black26,
-                        blurRadius: 4,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Icon(Icons.store, color: Colors.white, size: 20),
-                ),
-              ),
-              SizedBox(width: 8),
-              GestureDetector(
-                onTap: isSleeping ? null : _openStorage,
-                child: Container(
-                  padding: EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isSleeping ? Colors.grey.shade700 : Colors.blue.shade600,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black26,
-                        blurRadius: 4,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Icon(Icons.inventory, color: Colors.white, size: 20),
-                ),
-              ),
-              SizedBox(width: 8),
-              GestureDetector(
-                onTap: () => _onButtonTap('Premium', context),
-                child: Container(
-                  padding: EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isSleeping ? Colors.grey.shade700 : Colors.orange.shade400,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black26,
-                        blurRadius: 4,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Icon(Icons.star, color: Colors.white, size: 20),
-                ),
-              ),
-              SizedBox(width: 8),
-              GestureDetector(
-                onTap: isSleeping ? null : _forceSleep,
-                child: Container(
-                  padding: EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: isSleeping ? Colors.grey.shade700 : Colors.indigo.shade600,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black26,
-                        blurRadius: 4,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Icon(Icons.bedtime, color: Colors.white, size: 20),
-                ),
-              ),
-              SizedBox(width: 8),
-              GestureDetector(
-                onTap: () => _onButtonTap('Settings', context),
-                child: Container(
-                  padding: EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade600,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black26,
-                        blurRadius: 4,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Icon(Icons.settings, color: Colors.white, size: 20),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+          ],
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _buildCharacterArea() {
     print('Building CharacterArea with GLB: $_currentGlb, equippedSkin: $equippedSkin, isSleeping: $isSleeping, reloadModel: $_reloadModel');
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 10,
-            offset: Offset(0, 5),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: Stack(
-          children: [
-            GestureDetector(
-              onTap: _onCharacterTap,
-              child: Container(
-                width: double.infinity,
-                height: double.infinity,
-                child: AnimatedBuilder(
-                  animation: _shakeAnimation,
-                  builder: (context, child) {
-                    return Transform.translate(
-                      offset: Offset(
-                        _isSpeakingCulturalResponse ? sin(_shakeAnimation.value * 2 * pi) * 5 : 0,
-                        0,
-                      ),
-                      child: Visibility(
-                        visible: !_reloadModel,
-                        replacement: Container(),
-                        child: ModelViewer(
-                          key: ValueKey('$_currentGlb$_reloadModel'),
-                          backgroundColor: Colors.transparent,
-                          src: isSleeping
-                              ? _currentGlb
-                              : (equippedSkin != null
-                                  ? 'assets/glb/$equippedSkin.glb'
-                                  : _currentGlb),
-                          alt: 'Water Puppet Character',
-                          ar: false,
-                          autoRotate: !isSleeping && !_isSpeakingCulturalResponse,
-                          autoRotateDelay: 3000,
-                          rotationPerSecond: '30deg',
-                          cameraControls: true,
-                          disableZoom: true,
-                          touchAction: TouchAction.none,
-                          interactionPrompt: InteractionPrompt.none,
-                          cameraOrbit: '0deg 75deg 4.5m',
-                          minCameraOrbit: 'auto 50deg auto',
-                          maxCameraOrbit: 'auto 100deg auto',
-                          fieldOfView: '30deg',
-                          loading: Loading.eager,
-                        ),
-                      ),
-                    );
-                  },
+    return AnimatedBuilder(
+      animation: _levelUpAnimation,
+      builder: (context, child) {
+        return Transform.scale(
+          scale: _levelUpAnimation.value,
+          child: Container(
+            margin: EdgeInsets.symmetric(horizontal: 20),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 10,
+                  offset: Offset(0, 5),
                 ),
-              ),
+              ],
             ),
-            if (!isSleeping)
-              Positioned(
-                top: 20,
-                right: 20,
-                child: AnimatedBuilder(
-                  animation: _heartAnimation,
-                  builder: (context, child) {
-                    return Transform.scale(
-                      scale: _heartAnimation.value,
-                      child: Icon(
-                        Icons.favorite,
-                        color: Colors.red,
-                        size: 30,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: Stack(
+                children: [
+                  GestureDetector(
+                    onTap: _onCharacterTap,
+                    child: Container(
+                      width: double.infinity,
+                      height: double.infinity,
+                      child: AnimatedBuilder(
+                        animation: _shakeAnimation,
+                        builder: (context, child) {
+                          return Transform.translate(
+                            offset: Offset(
+                              _isSpeakingCulturalResponse ? sin(_shakeAnimation.value * 2 * pi) * 5 : 0,
+                              0,
+                            ),
+                            child: Visibility(
+                              visible: !_reloadModel,
+                              replacement: Container(),
+                              child: ModelViewer(
+                                key: ValueKey('$_currentGlb$_reloadModel'),
+                                backgroundColor: Colors.transparent,
+                                src: isSleeping
+                                    ? _currentGlb
+                                    : (equippedSkin != null
+                                        ? 'assets/glb/$equippedSkin.glb'
+                                        : _currentGlb),
+                                alt: 'Water Puppet Character',
+                                ar: false,
+                                autoRotate: !isSleeping && !_isSpeakingCulturalResponse,
+                                autoRotateDelay: 3000,
+                                rotationPerSecond: '30deg',
+                                cameraControls: true,
+                                disableZoom: true,
+                                touchAction: TouchAction.none,
+                                interactionPrompt: InteractionPrompt.none,
+                                cameraOrbit: '0deg 75deg 4.5m',
+                                minCameraOrbit: 'auto 50deg auto',
+                                maxCameraOrbit: 'auto 100deg auto',
+                                fieldOfView: '30deg',
+                                loading: Loading.eager,
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    );
-                  },
-                ),
-              ),
-            Positioned(
-              bottom: 10,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  child: Text(
-                    isSleeping ? 'Sleeping...' : 'Tap to interact!',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                ),
-              ),
-            ),
-            if (equippedSkin != null)
-              Positioned(
-                top: 10,
-                left: 10,
-                child: Container(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade400,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    'Skin: $equippedSkin',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                  if (!isSleeping)
+                    Positioned(
+                      top: 20,
+                      right: 20,
+                      child: AnimatedBuilder(
+                        animation: _heartAnimation,
+                        builder: (context, child) {
+                          return Transform.scale(
+                            scale: _heartAnimation.value,
+                            child: Icon(
+                              Icons.favorite,
+                              color: Colors.red,
+                              size: 30,
+                            ),
+                          );
+                        },
+                      ),
                     ),
-                  ),
-                ),
-              ),
-            if (!isSleeping)
-              Positioned(
-                bottom: 50,
-                left: 0,
-                right: 0,
-                child: Column(
-                  children: [
-                    ElevatedButton(
-                      onPressed: _speechService.isListening || _isSpeakingCulturalResponse
-                          ? null
-                          : () {
-                              HapticFeedback.selectionClick();
-                              _speechService.startListening(_updateEmotionResults);
-                            },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.purple.shade400,
-                        foregroundColor: Colors.white,
-                        padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        shape: RoundedRectangleBorder(
+                  Positioned(
+                    bottom: 10,
+                    left: 0,
+                    right: 0,
+                    child: Center(
+                      child: Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
                           borderRadius: BorderRadius.circular(15),
                         ),
-                      ),
-                      child: Text(
-                        _speechService.isListening ? 'Recording...' : 'Record Speech',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                    SizedBox(height: 10),
-                    Text(
-                      'Status: $_status',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
+                        child: Text(
+                          isSleeping ? 'Sleeping...' : 'Tap to interact!',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
                       ),
                     ),
-                    SizedBox(height: 10),
-                    Text(
-                      'Emotion: ${_dominantEmotion.isEmpty ? "None" : _dominantEmotion}',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
+                  ),
+                  if (equippedSkin != null)
+                    Positioned(
+                      top: 10,
+                      left: 10,
+                      child: Container(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade400,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          'Skin: $equippedSkin',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
-                  ],
-                ),
+                  if (!isSleeping)
+                    Positioned(
+                      bottom: 50,
+                      left: 0,
+                      right: 0,
+                      child: Column(
+                        children: [
+                          ElevatedButton(
+                            onPressed: _speechService.isListening || _isSpeakingCulturalResponse
+                                ? null
+                                : () {
+                                    HapticFeedback.selectionClick();
+                                    _speechService.startListening(_updateEmotionResults);
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.purple.shade400,
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(15),
+                              ),
+                            ),
+                            child: Text(
+                              _speechService.isListening ? 'Recording...' : 'Record Speech',
+                              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          SizedBox(height: 10),
+                          Text(
+                            'Status: $_status',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          SizedBox(height: 10),
+                          Text(
+                            'Emotion: ${_dominantEmotion.isEmpty ? "None" : _dominantEmotion}',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
               ),
-          ],
-        ),
-      ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1102,6 +1228,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                     setState(() {
                       energy = newEnergy;
                       coins = newCoins;
+                      _addExp(100); // Gain 100 EXP per game
                       if (energy < 10) {
                         Timer(Duration(milliseconds: 500), () {
                           _enterSleepMode();
@@ -1151,37 +1278,37 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildDailyReward() {
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
-      child: ElevatedButton(
-        onPressed: () => _onButtonTap('Daily Reward', context),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.amber.shade400,
-          foregroundColor: Colors.white,
-          padding: EdgeInsets.symmetric(vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          elevation: 4,
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.card_giftcard, size: 20),
-            SizedBox(width: 8),
-            Text(
-              'Daily Reward',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  // Widget _buildDailyReward() {
+  //   return Container(
+  //     margin: EdgeInsets.symmetric(horizontal: 20, vertical: 5),
+  //     child: ElevatedButton(
+  //       onPressed: () => _onButtonTap('Daily Reward', context),
+  //       style: ElevatedButton.styleFrom(
+  //         backgroundColor: Colors.amber.shade400,
+  //         foregroundColor: Colors.white,
+  //         padding: EdgeInsets.symmetric(vertical: 12),
+  //         shape: RoundedRectangleBorder(
+  //           borderRadius: BorderRadius.circular(20),
+  //         ),
+  //         elevation: 4,
+  //       ),
+  //       child: Row(
+  //         mainAxisAlignment: MainAxisAlignment.center,
+  //         children: [
+  //           Icon(Icons.card_giftcard, size: 20),
+  //           SizedBox(width: 8),
+  //           Text(
+  //             'Daily Reward',
+  //             style: TextStyle(
+  //               fontSize: 16,
+  //               fontWeight: FontWeight.bold,
+  //             ),
+  //           ),
+  //         ],
+  //       ),
+  //     ),
+  //   );
+  // }
 }
 
 class SpeechBubblePainter extends CustomPainter {
