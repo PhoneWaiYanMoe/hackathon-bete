@@ -95,21 +95,18 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
 
   Future<void> _initializeCamera() async {
     try {
-      // Check camera permission
       final cameraStatus = await Permission.camera.request();
       if (!cameraStatus.isGranted) {
         _showError('Camera permission denied. Please enable camera access in settings.');
         return;
       }
 
-      // Get available cameras
       _cameras = await availableCameras();
       if (_cameras.isEmpty) {
         _showError('No cameras found on this device.');
         return;
       }
 
-      // Find front camera
       CameraDescription? frontCamera;
       try {
         frontCamera = _cameras.firstWhere(
@@ -119,7 +116,6 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
         frontCamera = _cameras.first;
       }
 
-      // Initialize camera
       _cameraController = CameraController(
         frontCamera,
         ResolutionPreset.medium,
@@ -132,7 +128,6 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
         _isCameraInitialized = true;
       });
 
-      // Start emotion detection
       _startEmotionDetection();
     } catch (e) {
       _showError('Error initializing camera: $e');
@@ -149,11 +144,8 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
           backgroundColor: Colors.red.shade600,
         ),
       );
-      // Return to previous screen after showing error
       Future.delayed(const Duration(seconds: 3), () {
-        if (mounted) {
-          Navigator.pop(context);
-        }
+        if (mounted) Navigator.pop(context);
       });
     }
   }
@@ -164,11 +156,8 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
       return;
     }
 
-    _emotionTimer = Timer.periodic(const Duration(seconds: 2), (timer) async {
-      if (!_isProcessing &&
-          _isCameraInitialized &&
-          _currentChainIndex < _emotionChains.length &&
-          mounted) {
+    _emotionTimer = Timer.periodic(const Duration(seconds: 5), (timer) async { // Increased to 5 seconds
+      if (!_isProcessing && _isCameraInitialized && _currentChainIndex < _emotionChains.length && mounted) {
         _isProcessing = true;
         await _processCameraFrame();
         _isProcessing = false;
@@ -193,7 +182,7 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
               );
             }
             _nextEmotion();
-          } else if (_detectedEmotion.isNotEmpty) {
+          } else if (_detectedEmotion.isNotEmpty && _detectedEmotion != 'No face') { // Added check for 'No face'
             setState(() {
               _chuTeuState = ChuTeuState.wrong;
               _chuTeuController.repeat(reverse: true);
@@ -219,9 +208,7 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
   }
 
   Future<void> _processCameraFrame() async {
-    if (!_cameraController.value.isInitialized || !mounted) {
-      return;
-    }
+    if (!_cameraController.value.isInitialized || !mounted) return;
 
     try {
       final image = await _cameraController.takePicture();
@@ -229,11 +216,10 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
       final base64Image = base64Encode(bytes);
       print('Captured image, base64 length: ${base64Image.length}'); // Debug
 
-      // Send to backend
       final response = await http.post(
         Uri.parse('http://172.28.240.138:5001/detect_face_emotion_base64'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'image_base64': base64Image}),
+        body: jsonEncode({'image_data': base64Image}),
       );
 
       print('Backend response status: ${response.statusCode}'); // Debug
@@ -241,19 +227,32 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final emotion = data['emotion']?.toString();
-        final confidence = data['confidence']?.toDouble() ?? 0.0;
+        if (data['success'] == true && data['primary_face'] != null) {
+          final emotion = data['primary_face']['emotion']?.toString() ?? 'No face';
+          final confidence = data['primary_face']['confidence']?.toDouble() ?? 0.0;
 
-        if (emotion != null && mounted) {
-          setState(() {
-            _detectedEmotion = _normalizeEmotionLabel(emotion);
-          });
-          print('Detected emotion: $_detectedEmotion (confidence: ${confidence.toStringAsFixed(3)})'); // Debug
+          print('Raw emotion from backend: $emotion, Confidence: $confidence'); // Debug raw data
+
+          if (confidence >= 50.0) { // Add confidence threshold
+            if (mounted) {
+              setState(() {
+                _detectedEmotion = _normalizeEmotionLabel(emotion);
+              });
+              print('Detected emotion: $_detectedEmotion (confidence: ${confidence.toStringAsFixed(3)})'); // Debug
+            }
+          } else {
+            if (mounted) {
+              setState(() {
+                _detectedEmotion = 'No face'; // Fallback if confidence is too low
+              });
+              print('Low confidence detection: $confidence%'); // Debug
+            }
+          }
         } else {
           setState(() {
             _detectedEmotion = 'No face';
           });
-          print('No valid emotion detected in response'); // Debug
+          print('No valid emotion or face detected in response: ${data['message']}'); // Debug message
         }
       } else {
         setState(() {
@@ -272,14 +271,13 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
   }
 
   String _normalizeEmotionLabel(String emotion) {
-    // Normalize backend emotion labels to match _emotions list
     final normalized = emotion.toLowerCase();
-    if (normalized.contains('angry') || normalized.contains('anger')) return 'Angry';
+    if (normalized.contains('angry')) return 'Angry';
     if (normalized.contains('disgust')) return 'Disgust';
     if (normalized.contains('fear')) return 'Fear';
-    if (normalized.contains('happy') || normalized.contains('positive')) return 'Happy';
+    if (normalized.contains('happy')) return 'Happy';
     if (normalized.contains('neutral')) return 'Neutral';
-    if (normalized.contains('sad') || normalized.contains('negative')) return 'Sad';
+    if (normalized.contains('sad')) return 'Sad';
     if (normalized.contains('surprise')) return 'Surprise';
     return 'Neutral'; // Default fallback
   }
@@ -417,7 +415,6 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
             children: [
               Column(
                 children: [
-                  // Top Bar
                   Padding(
                     padding: const EdgeInsets.all(16),
                     child: Row(
@@ -491,8 +488,6 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
                       ],
                     ),
                   ),
-
-                  // Camera Feed
                   if (_isCameraInitialized)
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 20),
@@ -514,10 +509,7 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
                         child: CircularProgressIndicator(color: Colors.white),
                       ),
                     ),
-
                   const SizedBox(height: 10),
-
-                  // Detection Status
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     decoration: BoxDecoration(
@@ -533,8 +525,6 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
                       ),
                     ),
                   ),
-
-                  // Emotion Chain Display
                   if (_currentChainIndex < _emotionChains.length)
                     Padding(
                       padding: const EdgeInsets.all(16),
@@ -586,8 +576,6 @@ class _EmoTiGameState extends State<EmoTiGame> with TickerProviderStateMixin {
                     ),
                 ],
               ),
-
-              // Chú Tễu Character
               Positioned(
                 bottom: 20,
                 right: 20,
