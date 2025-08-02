@@ -92,7 +92,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   File? _storageFile;
 
   final SpeechEmotionService _speechService = SpeechEmotionService();
-  String _currentGlb = 'assets/glb/c_neutral.glb';
+  String _currentGlb = 'assets/glb/c_smile.glb';
   String _transcribedText = '';
   String _dominantEmotion = '';
   List<Map<String, dynamic>> _emotionResults = [];
@@ -428,7 +428,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       case 'anger':
         newGlb = 'assets/glb/c_angry.glb';
         break;
-      case 'sad':
+      case 'sadness':
       case 'negative':
         newGlb = 'assets/glb/c_cry.glb';
         break;
@@ -464,7 +464,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  @override
+ @override
   void dispose() {
     _heartController.dispose();
     _sleepController.dispose();
@@ -530,6 +530,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+ 
   Widget _buildSleepOverlay() {
     return Positioned(
       top: 0,
